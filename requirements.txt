@@ -1,0 +1,18 @@
+# --- core (all owners) ---
+networkx>=3.0          # graph_tool + FlowGraph.to_networkx()
+pytest>=8.0
+
+# --- data / reader (Owner A) ---
+# (mermaid parsing is stdlib regex; no dep needed for the text path)
+
+# --- VLM reader, Apple Silicon local inference (Owner A, stretch) ---
+# Install one of these locally; kept commented so CI stays light.
+# mlx-vlm>=0.1.0       # Qwen3-VL on Apple Silicon via MLX
+# pillow>=10.0         # image loading
+# Alternatively run Qwen3-VL through Ollama: `ollama pull qwen3-vl:4b`
+
+# --- agents (Owner B / C) ---
+# Pick your LLM client; kept commented until the agent branch needs it.
+# anthropic>=0.40
+# openai>=1.0
+# sentence-transformers>=3.0   # embedding-similarity judge option (spec §9)

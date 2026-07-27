@@ -1,0 +1,27 @@
+{
+  "code00453": {
+    "key": "code00453",
+    "code": "def find_fixed_point(arr, n):\n    for i in range(n):\n        if arr[i] == i:\n            return i\n    return -1",
+    "summary": "START -> INPUT arr,n -> loop i -> DECISION arr[i]==i -> OUTPUT i / END -1",
+    "mermaid": "flowchart TD\n    A([\"Start\"]) --> B[/\"Input arr, n\"/]\n    B --> C[\"i = 0\"]\n    C --> D{\"arr[i] == i?\"}\n    D -->|Yes| E[/\"Output i\"/]\n    D -->|No| F[\"i = i + 1\"]\n    F --> C\n    E --> G([\"End\"])",
+    "qa": {
+      "1": {
+        "Q": "What does the flowchart output when a fixed point is found?",
+        "A1": "It outputs the index i.",
+        "A2": "The index i is returned.",
+        "A3": "It returns i, the fixed point index.",
+        "type": "fact_retrieval"
+      },
+      "4": {
+        "Q": "How many nodes exist in the given flowchart?",
+        "A1": "7",
+        "type": "topological"
+      },
+      "5": {
+        "Q": "How many edges exist in the given flowchart?",
+        "A1": "7",
+        "type": "topological"
+      }
+    }
+  }
+}

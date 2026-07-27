@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# data & model artifacts (keep the repo light)
+data/*.json
+!data/README.md
+data/images/
+data/raw/
+models/
+runs/          # trace logs (spec §12)
+*.gguf
+*.safetensors
