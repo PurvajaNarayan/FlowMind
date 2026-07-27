@@ -2,8 +2,10 @@
 networkx>=3.0          # graph_tool + FlowGraph.to_networkx()
 pytest>=8.0
 
-# --- data / reader (Owner A) ---
+# --- data / reader / router (Owner A) ---
 # (mermaid parsing is stdlib regex; no dep needed for the text path)
+scikit-learn>=1.4      # question-type classifier (question_classifier.py)
+joblib>=1.3            # model persistence
 
 # --- VLM reader, Apple Silicon local inference (Owner A, stretch) ---
 # Install one of these locally; kept commented so CI stays light.

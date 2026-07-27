@@ -53,6 +53,7 @@ flowmind/
   tracing.py        # FROZEN CONTRACT: per-sample trace log (spec §12).
   data.py           # dataset loader / iterator                         [Owner: A]
   router.py         # intent dispatch (spec §7.0)                       [Owner: A]
+  question_classifier.py  # TF-IDF+LogReg question-type model (no LLM)  [Owner: A]
   graph_tool.py     # deterministic topological answers (spec §7.2)     [Owner: A]
   reader/
     mermaid_reader.py  # mermaid text -> FlowGraph (spec §7.1)          [Owner: A]
@@ -64,8 +65,10 @@ flowmind/
     ablation.py     # single-pass vs full pipeline (§8), stub           [Owner: C]
 tools/
   parser_coverage.py  # M1 metric: parser+graph tool vs FlowVQA gold    [Owner: A]
+  train_router.py     # train/evaluate the question-type classifier     [Owner: A]
 tests/              # unit tests + fixtures (tests/fixtures/sample.json)
 data/               # dataset (gitignored; see data/README.md)
+models/             # fitted models, e.g. question_classifier.joblib (gitignored)
 ```
 
 ---
@@ -128,10 +131,36 @@ gt.max_indegree(g)                        # int
 ```python
 from flowmind.router import route
 
-route("How many nodes exist?", qa_type="topological")   # "topological"
-route("Write runnable python for this")                 # "code_request" (heuristic)
+route("How many nodes exist?", qa_type="topological")   # "topological" (uses the label)
+route("Which node follows the decision on No?")         # "content"  (trained model)
+route("Write runnable python for this")                 # "code_request" (keyword)
 # When evaluating on FlowVQA, always pass qa_type — it's a free, correct label.
 ```
+
+### Question-type classifier — no-LLM model (spec §7.0 fallback)
+
+A TF-IDF + Logistic Regression model that maps a question to one of the four
+FlowVQA types. Train on `train_full.json`, evaluate on `test_full.json`:
+
+```bash
+python tools/train_router.py
+# -> prints accuracy + per-class report + confusion matrix
+# -> saves models/question_classifier.joblib
+```
+
+Latest result: **99.5% test accuracy** (topological 100%; the rest are the
+natural-language types). Use it directly:
+
+```python
+from flowmind.question_classifier import QuestionTypeClassifier
+clf = QuestionTypeClassifier.load()            # models/question_classifier.joblib
+clf.predict("How many edges exist?")           # "topological"
+clf.predict_proba("What does the node output?")  # {type: prob, ...}
+```
+
+The router loads this model automatically for unlabeled questions; if the
+`.joblib` isn't present it falls back to the keyword heuristic, so retrain with
+the command above after cloning (the model file is gitignored).
 
 ### Trace logging (spec §12 — shared, used by everyone)
 ```python
@@ -169,6 +198,9 @@ g = image_to_graph("data/images/main/code00453.png")   # raises NotImplementedEr
   Reproduce with `python tools/parser_coverage.py data/train_full.json`.
   Residual is dataset gold-label noise + label-resolution ambiguity (multiple
   nodes sharing a label, e.g. "End") — the next M1 task, a Reader concern.
+
+  Question-type classifier (no-LLM router fallback): **99.5%** on `test_full.json`
+  (`python tools/train_router.py`).
 
 - **M2–M5** — Examiner, Planner, eval, ablation: interfaces stubbed, ready to build.
 

@@ -1,0 +1,17 @@
+# VLM Reader dependencies (Owner A, stretch goal). Heavy — install separately:
+#     pip install -r requirements-vlm.txt
+# Not needed for the text pipeline / tests.
+
+torch>=2.4                 # MPS backend on Apple Silicon
+torchvision>=0.19          # required by Qwen3-VL image/video processor
+transformers>=4.57         # Qwen3-VL support
+accelerate>=0.34
+pillow>=10.0               # image loading
+huggingface_hub>=0.25      # model download / auth
+qwen-vl-utils>=0.0.8       # Qwen vision input helper (optional but recommended)
+
+# --- fine-tuning (later, on a cloud GPU — NOT on Apple Silicon) ---
+# peft>=0.13               # LoRA
+# datasets>=3.0
+# trl>=0.11
+# bitsandbytes             # 4-bit quant (CUDA only)
