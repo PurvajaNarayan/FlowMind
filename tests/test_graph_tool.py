@@ -7,9 +7,11 @@ def test_counts(graph):
 
 
 def test_adjacency(graph):
-    assert gt.is_direct_successor(graph, "A", "B")
-    assert not gt.is_direct_successor(graph, "A", "C")
-    assert gt.is_direct_predecessor(graph, "B", "A")
+    # edge A -> B exists in the fixture
+    assert gt.is_direct_predecessor(graph, "A", "B")   # A precedes B
+    assert gt.is_direct_successor(graph, "B", "A")      # B follows A
+    assert not gt.is_direct_predecessor(graph, "A", "C")
+    assert not gt.is_direct_successor(graph, "A", "B")  # A does not follow B
 
 
 def test_shortest_path(graph):

@@ -22,7 +22,17 @@ _SHAPE_PATTERNS = [
 ]
 
 _NODE_TOKEN = re.compile(r'^\s*([A-Za-z0-9_]+)\s*(.*)$', re.S)
-_EDGE = re.compile(r'^(.*?)\s*--+>\s*(?:\|(.*?)\|\s*)?(.*)$', re.S)
+
+# Any FlowVQA edge operator (solid --> , dotted -.-> , thick ==> , longer runs),
+# with an optional trailing |label|. Used with re.split so a single line with
+# chained edges (A -->|Yes| B --> C) becomes tokens + per-edge labels.
+_ARROW = re.compile(r'\s*[-.=]{2,}>\s*(?:\|([^|]*)\|\s*)?')
+
+# Lines that define graph metadata, not nodes/edges.
+_SKIP_PREFIXES = (
+    "flowchart", "graph", "%%", "subgraph", "end", "direction",
+    "classDef", "class ", "style ", "linkStyle", "click ",
+)
 
 
 def _clean_label(raw: str) -> str:
@@ -59,17 +69,25 @@ def mermaid_to_graph(mermaid: str) -> FlowGraph:
 
     for line in mermaid.splitlines():
         line = line.strip()
-        if not line or line.startswith(("flowchart", "graph", "%%", "subgraph", "end")):
+        if not line or line.startswith(_SKIP_PREFIXES):
             continue
 
-        em = _EDGE.match(line)
-        if em:
-            src = _parse_token(em.group(1), nodes)
-            label = _clean_label(em.group(2)) if em.group(2) else None
-            dst = _parse_token(em.group(3), nodes)
-            if src and dst:
-                edges.append(Edge(source=src, target=dst, label=label))
-        else:
-            _parse_token(line, nodes)  # a standalone node definition
+        # Split on every arrow. re.split with one capture group returns:
+        #   [tok0, label0, tok1, label1, tok2, ...]
+        # so labels[i] is the edge label between tokens[i] and tokens[i+1]
+        # (None when that arrow had no |label|). One node line -> one token, no edges.
+        parts = _ARROW.split(line)
+        tokens, labels = parts[0::2], parts[1::2]
+        ids = [_parse_token(t, nodes) for t in tokens]
+        for i in range(len(ids) - 1):
+            if ids[i] and ids[i + 1]:
+                raw = labels[i] if i < len(labels) else None
+                edges.append(
+                    Edge(
+                        source=ids[i],
+                        target=ids[i + 1],
+                        label=_clean_label(raw) if raw else None,
+                    )
+                )
 
     return FlowGraph(nodes=list(nodes.values()), edges=edges, source="mermaid")

@@ -16,7 +16,14 @@ def node_count(graph: FlowGraph) -> int:
 
 
 def edge_count(graph: FlowGraph) -> int:
-    return len(graph.edges)
+    """Number of distinct source->target edges.
+
+    Parallel edges (e.g. a decision's Yes and No branch pointing at the same
+    node) are counted once, matching FlowVQA's gold convention and staying
+    consistent with to_networkx() (a DiGraph, which also collapses them).
+    The full parallel edges remain available in graph.edges for label lookups.
+    """
+    return len({(e.source, e.target) for e in graph.edges})
 
 
 def shortest_path_edges(graph: FlowGraph, a: str, b: str) -> int | None:
@@ -29,14 +36,20 @@ def shortest_path_edges(graph: FlowGraph, a: str, b: str) -> int | None:
         return None
 
 
-def is_direct_successor(graph: FlowGraph, a: str, b: str) -> bool:
-    """True if there is an edge a -> b."""
-    return any(e.source == a and e.target == b for e in graph.edges)
+def _has_edge(graph: FlowGraph, src: str, dst: str) -> bool:
+    return any(e.source == src and e.target == dst for e in graph.edges)
 
 
-def is_direct_predecessor(graph: FlowGraph, a: str, b: str) -> bool:
-    """True if there is an edge b -> a (i.e. a is a direct predecessor of b)."""
-    return is_direct_successor(graph, b, a)
+def is_direct_predecessor(graph: FlowGraph, x: str, y: str) -> bool:
+    """True if x is a direct predecessor of y, i.e. edge x -> y exists.
+    Matches the FlowVQA question 'Is node X direct predecessor of node Y?'."""
+    return _has_edge(graph, x, y)
+
+
+def is_direct_successor(graph: FlowGraph, x: str, y: str) -> bool:
+    """True if x is a direct successor of y, i.e. edge y -> x exists.
+    Matches the FlowVQA question 'Is node X direct successor of node Y?'."""
+    return _has_edge(graph, y, x)
 
 
 def max_indegree(graph: FlowGraph) -> int:
