@@ -14,7 +14,7 @@ Full spec: [`flowmind_feature_spec.md`](./flowmind_feature_spec.md).
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest                       # 14 tests, deterministic pieces — should be green
+pytest                       # 16 tests, deterministic pieces — should be green
 ```
 
 Then drop the dataset into `data/` (see [Data setup](#data-setup)) and run the
