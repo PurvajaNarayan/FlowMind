@@ -65,10 +65,15 @@ def evaluate(path: str, show_fails: str | None = None):
 
             if "how many nodes" in Q:
                 kind, pred = "node_count", gt.node_count(g)
+            # Degree questions before edge_count: they mention "incoming/outgoing
+            # edges" in their preamble, and FlowVQA writes them as one word
+            # ("indegree"/"outdegree"), not "in-degree".
+            elif "outdegree" in Q or "out-degree" in Q or "out degree" in Q:
+                kind, pred = "max_outdegree", gt.max_outdegree(g)
+            elif "indegree" in Q or "in-degree" in Q or "in degree" in Q:
+                kind, pred = "max_indegree", gt.max_indegree(g)
             elif "how many edges" in Q and "shortest path" not in Q:
                 kind, pred = "edge_count", gt.edge_count(g)
-            elif "in-degree" in Q or "in degree" in Q:
-                kind, pred = "max_indegree", gt.max_indegree(g)
             elif "shortest path" in Q and len(labs) >= 2:
                 kind = "shortest_path"
                 a, b = resolve(g, labs[0]), resolve(g, labs[1])

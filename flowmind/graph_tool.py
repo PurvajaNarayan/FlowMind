@@ -53,5 +53,19 @@ def is_direct_successor(graph: FlowGraph, x: str, y: str) -> bool:
 
 
 def max_indegree(graph: FlowGraph) -> int:
+    """Highest number of incoming edges on any node.
+    FlowVQA phrases this as 'What is the maximum indegree for the flowchart?'."""
     g = graph.to_networkx()
     return max((d for _, d in g.in_degree()), default=0)
+
+
+def max_outdegree(graph: FlowGraph) -> int:
+    """Highest number of outgoing edges on any node — the decision-branch counterpart
+    of max_indegree. FlowVQA asks this as often as it asks about indegree, so the
+    deterministic lane needs both.
+
+    Like edge_count, this runs over the DiGraph, so a decision's parallel Yes/No
+    edges into the same target count once. That matches FlowVQA's gold answers.
+    """
+    g = graph.to_networkx()
+    return max((d for _, d in g.out_degree()), default=0)
