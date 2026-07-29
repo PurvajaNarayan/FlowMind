@@ -125,6 +125,7 @@ gt.shortest_path_edges(g, "A", "D")       # int | None
 gt.is_direct_predecessor(g, "A", "B")     # True  (edge A->B: A precedes B)
 gt.is_direct_successor(g, "B", "A")       # True  (edge A->B: B follows A)
 gt.max_indegree(g)                        # int
+gt.max_outdegree(g)                       # int
 ```
 
 ### Router — intent dispatch (spec §7.0)
@@ -186,18 +187,31 @@ g = image_to_graph("data/images/main/code00453.png")   # raises NotImplementedEr
 - **M0 done** — data loader, Mermaid parser, router, graph tool, all tested.
 - **M1 in progress** — deterministic topological lane on all 1319 train records:
 
-  | subtype | accuracy |
-  |---|---|
-  | node_count | 100.0% |
-  | shortest_path | 99.6% |
-  | direct_predecessor | 99.1% |
-  | direct_successor | 98.4% |
-  | edge_count | 97.1% |
-  | **overall** | **98.8%** |
+  | subtype | accuracy | scored |
+  |---|---|---|
+  | node_count | 100.0% | 1207/1207 |
+  | max_outdegree | 100.0% | 101/101 |
+  | shortest_path | 99.6% | 822/825 |
+  | direct_predecessor | 99.1% | 766/773 |
+  | direct_successor | 98.4% | 801/814 |
+  | edge_count | 97.1% | 1172/1207 |
+  | max_indegree | 95.1% | 427/449 |
+  | **overall** | **98.5%** | **5296/5376** |
 
   Reproduce with `python tools/parser_coverage.py data/train_full.json`.
+  Covers 5376 of the 5516 topological questions in train (97.5%); the 140 not
+  scored are label-unresolved (see below).
+
   Residual is dataset gold-label noise + label-resolution ambiguity (multiple
   nodes sharing a label, e.g. "End") — the next M1 task, a Reader concern.
+  `max_indegree` is now the weakest subtype and hasn't been error-analysed yet.
+
+  > Earlier revisions of this table reported **98.8%** over 4826 questions. That
+  > figure silently excluded every degree question: the harness tested for
+  > `"in-degree"`, but FlowVQA writes it as one word (`"indegree"`), so 449
+  > indegree questions fell through unscored — and `max_outdegree` (101 more)
+  > had no graph-tool function at all. Both are fixed; the number moved to 98.5%
+  > because indegree, at 95.1%, is the worst-performing subtype.
 
   Question-type classifier (no-LLM router fallback): **99.5%** on `test_full.json`
   (`python tools/train_router.py`).

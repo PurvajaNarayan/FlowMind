@@ -23,3 +23,8 @@ def test_shortest_path(graph):
 def test_max_indegree(graph):
     # C is entered by B and by F  => in-degree 2, the max
     assert gt.max_indegree(graph) == 2
+
+
+def test_max_outdegree(graph):
+    # D branches to E (Yes) and F (No)  => out-degree 2, the max
+    assert gt.max_outdegree(graph) == 2
