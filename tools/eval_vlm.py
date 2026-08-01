@@ -59,6 +59,7 @@ def main() -> None:
     ext = QwenVLExtractor()
 
     node_hits = edge_hits = both = total = 0
+    errors = downscaled = 0
     rows = []
     for i, key in enumerate(keys, 1):
         img = image_path_for(key, args.data_dir, args.layout)
@@ -69,20 +70,29 @@ def main() -> None:
         try:
             pred_mermaid = ext.image_to_mermaid(str(img))
         except Exception as e:  # keep the sweep going on a single bad decode
-            print(f"[{i}/{len(keys)}] {key}: ERROR {e}")
+            # CUDA OOM messages are a paragraph long; the first line is the useful bit.
+            print(f"[{i}/{len(keys)}] {key}: ERROR {str(e).splitlines()[0][:120]}")
+            errors += 1
             continue
+        scale = getattr(ext, "last_scale", 1.0)
         pred_graph = mermaid_to_graph(pred_mermaid)
         m = graph_extraction_accuracy(pred_graph, gold_mermaid)
         total += 1
         node_hits += m["node_count_match"]
         edge_hits += m["edge_count_match"]
         both += m["node_count_match"] and m["edge_count_match"]
+        if scale < 1.0:
+            downscaled += 1
         print(f"[{i}/{len(keys)}] {key}: "
               f"nodes {m['pred_nodes']}/{m['gold_nodes']} "
               f"{'OK' if m['node_count_match'] else 'X'} | "
               f"edges {m['pred_edges']}/{m['gold_edges']} "
-              f"{'OK' if m['edge_count_match'] else 'X'}")
-        rows.append({"key": key, "layout": args.layout,
+              f"{'OK' if m['edge_count_match'] else 'X'}"
+              + (f" | resized x{scale:.2f}" if scale < 1.0 else ""))
+        # `scale` matters for error analysis: a downscaled chart may have failed
+        # because the resize made its labels unreadable, not because the model
+        # cannot read flowcharts.
+        rows.append({"key": key, "layout": args.layout, "scale": scale,
                      "pred_mermaid": pred_mermaid, "gold_mermaid": gold_mermaid, **m})
 
     if total:
@@ -90,6 +100,11 @@ def main() -> None:
         print(f"  node-count match: {node_hits}/{total} ({100*node_hits/total:.1f}%)")
         print(f"  edge-count match: {edge_hits}/{total} ({100*edge_hits/total:.1f}%)")
         print(f"  both match:       {both}/{total} ({100*both/total:.1f}%)")
+        print(f"  downscaled:       {downscaled}/{total} "
+              f"(resized to fit the pixel cap — see vlm_reader docstring)")
+    if errors:
+        print(f"  FAILED outright:  {errors} (not counted above — report this "
+              f"alongside the percentages, they are not accuracy on the full sample)")
 
     if args.save and rows:
         p = Path(args.save)
