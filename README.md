@@ -191,20 +191,27 @@ g = image_to_graph("data/images/main/code00453.png")   # raises NotImplementedEr
   |---|---|---|
   | node_count | 100.0% | 1207/1207 |
   | max_outdegree | 100.0% | 101/101 |
-  | shortest_path | 99.6% | 822/825 |
-  | direct_predecessor | 99.1% | 766/773 |
-  | direct_successor | 98.4% | 801/814 |
+  | shortest_path | 99.7% | 861/864 |
+  | direct_predecessor | 99.6% | 807/810 |
+  | direct_successor | 99.2% | 854/861 |
   | edge_count | 97.1% | 1172/1207 |
   | max_indegree | 95.1% | 427/449 |
-  | **overall** | **98.5%** | **5296/5376** |
+  | **overall** | **98.7%** | **5429/5499** |
 
   Reproduce with `python tools/parser_coverage.py data/train_full.json`.
-  Covers 5376 of the 5516 topological questions in train (97.5%); the 140 not
-  scored are label-unresolved (see below).
+  Covers 5499 of the 5516 topological questions in train (**99.7%**). Of the 17
+  not scored, 6 are questions that paraphrase or misspell the node label they
+  quote (`"Is Home Orthodox"` for a node reading `Is the Home Orthodox?`;
+  `"memorizaton"` for `memorization`) and 11 don't quote two labels at all — both
+  dataset noise rather than parser gaps.
 
-  Residual is dataset gold-label noise + label-resolution ambiguity (multiple
-  nodes sharing a label, e.g. "End") — the next M1 task, a Reader concern.
-  `max_indegree` is now the weakest subtype and hasn't been error-analysed yet.
+  `edge_count` and `max_indegree` are now the weakest subtypes, and neither
+  involves label matching. On their failures gold is usually *lower* than our
+  count (`gold - ours` is −1 or −2 in most cases), i.e. the parser finds edges the
+  gold answer doesn't count. That's an unexplored over-generation issue and the
+  next thing to look at. Both conventions were checked against gold and the
+  deduplicating one is right: edge_count 97.1% deduped vs 96.4% raw,
+  max_indegree 95.1% vs 94.9% counting parallel edges separately.
 
   > Earlier revisions of this table reported **98.8%** over 4826 questions. That
   > figure silently excluded every degree question: the harness tested for
@@ -212,6 +219,13 @@ g = image_to_graph("data/images/main/code00453.png")   # raises NotImplementedEr
   > indegree questions fell through unscored — and `max_outdegree` (101 more)
   > had no graph-tool function at all. Both are fixed; the number moved to 98.5%
   > because indegree, at 95.1%, is the worst-performing subtype.
+  >
+  > A later revision reported **98.5%** over 5376 questions, with 129 skipped as
+  > label-unresolved. Those 129 were a Reader bug, not ambiguity: `_clean_label`
+  > stripped apostrophes from both ends of a label, truncating the 569 labels that
+  > legitimately end in one, so they no longer matched the label quoted in the
+  > question. Fixing that plus existential matching for duplicate labels brought
+  > coverage to 99.7%.
 
   Question-type classifier (no-LLM router fallback): **99.5%** on `test_full.json`
   (`python tools/train_router.py`).

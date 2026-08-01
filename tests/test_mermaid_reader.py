@@ -1,3 +1,4 @@
+from flowmind.reader.mermaid_reader import mermaid_to_graph
 from flowmind.schema import NodeShape
 
 
@@ -29,3 +30,30 @@ def test_edge_labels(graph):
 def test_find_by_label(graph):
     found = graph.find_by_label("start")
     assert [n.id for n in found] == ["A"]
+
+
+def test_label_keeps_trailing_apostrophe():
+    """A trailing apostrophe is part of the label, not a quote wrapper.
+
+    569 labels across 182 train charts end in one; stripping it made them
+    unmatchable against the label as quoted in the question.
+    """
+    g = mermaid_to_graph(
+        'flowchart TD\n'
+        '    A["Iterate over the list \'nums\'"] --> B[/"Output \'LEAP YEAR\'"/]\n'
+    )
+    assert g.node("A").label == "Iterate over the list 'nums'"
+    assert g.node("B").label == "Output 'LEAP YEAR'"
+
+
+def test_label_quote_wrappers_still_stripped():
+    g = mermaid_to_graph(
+        'flowchart TD\n'
+        '    A(["Start"]) --> B["\'Quoted\'"]\n'
+        '    B --> C["\'sum\' = \'sum\' + \'i\'"]\n'
+    )
+    assert g.node("A").label == "Start"
+    # A balanced pair with nothing quoted inside is a wrapper...
+    assert g.node("B").label == "Quoted"
+    # ...but this label genuinely starts and ends with an apostrophe.
+    assert g.node("C").label == "'sum' = 'sum' + 'i'"
