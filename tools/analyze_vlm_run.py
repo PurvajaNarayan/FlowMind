@@ -183,8 +183,14 @@ def main() -> None:
     failed = [r for r in res if r["parse_failed"]]
     good = [r for r in res if not r["degenerate"] and not r["parse_failed"]]
 
+    # Runs are only comparable if you know what produced them; older JSONLs
+    # predate these fields, hence the fallback.
+    provenance = {(r.get("prompt_version", "?"), r.get("model_id", "?")) for r in rows}
+    prov = ", ".join(f"prompt {p} / {m.split('/')[-1]}" for p, m in sorted(provenance))
+
     print(f"=== {args.jsonl}: {len(res)} samples "
-          f"({len(good)} scored, {len(degenerate)} degenerate, {len(failed)} unparseable) ===\n")
+          f"({len(good)} scored, {len(degenerate)} degenerate, {len(failed)} unparseable) ===")
+    print(f"    {prov}\n")
 
     if args.per_sample:
         print(f"{'key':<16}{'scale':>6}{'edgeF1':>8}{'labelRec':>10}"

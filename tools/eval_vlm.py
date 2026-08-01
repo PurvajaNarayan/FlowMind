@@ -57,6 +57,10 @@ def main() -> None:
     ds = json.load(open(args.data))
     keys = stratified_keys(ds, args.n)
     ext = QwenVLExtractor()
+    # Stated up front and stored per row: which prompt produced a run is the
+    # difference between two runs being comparable and being confusing later.
+    print(f"model {ext.model_id} | prompt {ext.prompt_version} | "
+          f"pixel cap {ext.max_pixels / 1e6:.2f} MP")
 
     node_hits = edge_hits = both = total = 0
     errors = downscaled = 0
@@ -93,6 +97,7 @@ def main() -> None:
         # because the resize made its labels unreadable, not because the model
         # cannot read flowcharts.
         rows.append({"key": key, "layout": args.layout, "scale": scale,
+                     "prompt_version": ext.prompt_version, "model_id": ext.model_id,
                      "pred_mermaid": pred_mermaid, "gold_mermaid": gold_mermaid, **m})
 
     if total:

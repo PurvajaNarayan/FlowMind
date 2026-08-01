@@ -57,15 +57,37 @@ DEFAULT_MAX_PIXELS = 4800 * 32 * 32
 # and a failure is more honest than a confidently-wrong graph.
 MIN_PIXELS_FLOOR = 512 * 32 * 32
 
-# Shapes were the one total failure of the first zero-shot sweep: over 20 charts
-# the model emitted 365 `process` nodes and 3 `decision`, against gold of 219
-# process / 56 decision / 51 io / 38 terminal. Measured shape accuracy was 61.4%,
-# which is exactly the 60.2% you get by labelling everything `process` — i.e. the
-# shape information was not being produced at all, even though the old prompt
-# listed the syntax. Listing it evidently isn't enough, so this version shows it
-# in use. The example deliberately contains all four shapes, a labelled Yes/No
-# branch, and a back-edge (E --> D), since loop edges were the other weak spot.
-PROMPT = (
+# --- Prompt ablation (select with FLOWMIND_VLM_PROMPT=v1|v2) --------------------
+#
+# Both versions are kept because the comparison is a measured result, not a
+# preference. Decoding is greedy (do_sample=False), so runs are bit-identical and
+# the whole v1 -> v2 delta is attributable to the prompt, with no sampling noise:
+#
+#                      v1 (default)   v2 (one-shot)
+#     label recall         0.971          0.836
+#     edge F1              0.860          0.729
+#     cycle recall         6/9            5/10
+#     shape accuracy      61.4%          55.3%
+#
+# v2 was an attempt to fix shapes, which v1 loses completely: v1 emitted 365
+# `process` and 3 `decision` across 20 charts against gold of 219/56/51/38, i.e.
+# it scored the 60.2% majority-class baseline. v2 did induce the syntax -- the mix
+# became process 238 / io 101 / terminal 9 / decision 20 -- but applies it wrongly
+# (101 io against 56 gold, 9 terminal against 40), so accuracy FELL. Every
+# structural metric regressed with it, and three charts (instruct00869, wiki00940,
+# instruct00619) came back as exactly 7 nodes with label recall ~0.1: the model
+# transcribed v2's 7-node example instead of reading the image.
+#
+# Conclusion: shape recognition is a perception gap, not a formatting one, so it
+# motivates a fine-tune rather than more prompt engineering. v1 stays the default.
+PROMPT_V1 = (
+    "You are reading a flowchart image. Output ONLY the Mermaid.js flowchart "
+    "script that reproduces it, starting with `flowchart TD`. Use ([...]) for "
+    "start/end, [/.../] for input/output, [...] for process, {...} for decision, "
+    "and -->|label| for labeled edges. No prose, no explanation, no code fences."
+)
+
+PROMPT_V2 = (
     "You are reading a flowchart image. Output ONLY the Mermaid.js flowchart "
     "script that reproduces it, starting with `flowchart TD`.\n"
     "\n"
@@ -89,6 +111,12 @@ PROMPT = (
     "drawn, and include arrows that loop back to an earlier node. No prose, no "
     "explanation, no code fences."
 )
+
+PROMPTS = {"v1": PROMPT_V1, "v2": PROMPT_V2}
+DEFAULT_PROMPT_VERSION = "v1"
+
+# Back-compat alias: anything still importing PROMPT gets the default.
+PROMPT = PROMPT_V1
 
 _FENCE_RE = re.compile(r"^```(?:mermaid)?\s*|\s*```$", re.MULTILINE)
 
@@ -149,7 +177,7 @@ class QwenVLExtractor:
 
     def __init__(self, model_id: str | None = None, device: str | None = None,
                  max_new_tokens: int = 1024, max_pixels: int | None = None,
-                 oom_retries: int = 2):
+                 oom_retries: int = 2, prompt_version: str | None = None):
         self.model_id = model_id or os.environ.get("FLOWMIND_VLM_MODEL", DEFAULT_MODEL_ID)
         self.device = device
         self.max_new_tokens = max_new_tokens
@@ -157,6 +185,16 @@ class QwenVLExtractor:
             max_pixels or os.environ.get("FLOWMIND_VLM_MAX_PIXELS", DEFAULT_MAX_PIXELS)
         )
         self.oom_retries = oom_retries
+
+        version = (prompt_version
+                   or os.environ.get("FLOWMIND_VLM_PROMPT", DEFAULT_PROMPT_VERSION))
+        if version not in PROMPTS:
+            raise ValueError(
+                f"unknown prompt version {version!r}; choose from {sorted(PROMPTS)}"
+            )
+        self.prompt_version = version
+        self.prompt = PROMPTS[version]
+
         self.last_scale = 1.0      # resize factor applied to the last image
         self._model = None
         self._processor = None
@@ -199,7 +237,7 @@ class QwenVLExtractor:
             "role": "user",
             "content": [
                 {"type": "image", "image": img},
-                {"type": "text", "text": PROMPT},
+                {"type": "text", "text": self.prompt},
             ],
         }]
         inputs = self._processor.apply_chat_template(
