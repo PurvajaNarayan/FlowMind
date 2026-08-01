@@ -37,15 +37,27 @@ def labels_in(q: str) -> list[str]:
     return [m.strip() for m in doubled] if doubled else re.findall(r'"([^"]+)"', q)
 
 
-def resolve(graph, label: str) -> str | None:
-    """Map a label string from a question back to a node id. Exact (period- and
-    case-insensitive) match first, then loose substring."""
+def resolve_all(graph, label: str) -> list[str]:
+    """Map a label from a question to EVERY node id it could mean.
+
+    Returning a list rather than one id matters: charts routinely contain two
+    nodes labelled "End" (also seen: duplicate process steps), and picking the
+    first arbitrarily was wrong about half the time -- ambiguous adjacency
+    questions scored 50% and 33% against 99.5%+ for unambiguous ones. Callers
+    resolve the ambiguity with the semantics of their own question instead:
+    "is X a predecessor of End" is true if X precedes ANY node labelled End.
+    """
     lab = label.strip().rstrip(".").strip().lower()
     exact = [n.id for n in graph.nodes if n.label.strip().rstrip(".").strip().lower() == lab]
     if exact:
-        return exact[0]
-    hits = graph.find_by_label(label.rstrip("."))
-    return hits[0].id if hits else None
+        return exact
+    return [n.id for n in graph.find_by_label(label.rstrip("."))]
+
+
+def resolve(graph, label: str) -> str | None:
+    """First candidate only. Kept for callers that genuinely want one id."""
+    hits = resolve_all(graph, label)
+    return hits[0] if hits else None
 
 
 def evaluate(path: str, show_fails: str | None = None):
@@ -76,25 +88,33 @@ def evaluate(path: str, show_fails: str | None = None):
                 kind, pred = "edge_count", gt.edge_count(g)
             elif "shortest path" in Q and len(labs) >= 2:
                 kind = "shortest_path"
-                a, b = resolve(g, labs[0]), resolve(g, labs[1])
-                if not (a and b):
+                A, B = resolve_all(g, labs[0]), resolve_all(g, labs[1])
+                if not (A and B):
                     unresolved += 1
                     continue
-                pred = gt.shortest_path_edges(g, a, b)
+                # Ambiguous label -> the shortest route between any pair of
+                # candidates, which is what "the shortest path" asks for.
+                lengths = [d for a in A for b in B
+                           if (d := gt.shortest_path_edges(g, a, b)) is not None]
+                pred = min(lengths) if lengths else None
             elif "predecessor" in Q and len(labs) >= 2:
                 kind = "direct_predecessor"
-                a, b = resolve(g, labs[0]), resolve(g, labs[1])
-                if not (a and b):
+                A, B = resolve_all(g, labs[0]), resolve_all(g, labs[1])
+                if not (A and B):
                     unresolved += 1
                     continue
-                pred = "Yes" if gt.is_direct_predecessor(g, a, b) else "No"
+                # "Is X a direct predecessor of End" holds if X precedes ANY node
+                # labelled End, so quantify existentially over the candidates.
+                pred = "Yes" if any(gt.is_direct_predecessor(g, a, b)
+                                    for a in A for b in B) else "No"
             elif "successor" in Q and len(labs) >= 2:
                 kind = "direct_successor"
-                a, b = resolve(g, labs[0]), resolve(g, labs[1])
-                if not (a and b):
+                A, B = resolve_all(g, labs[0]), resolve_all(g, labs[1])
+                if not (A and B):
                     unresolved += 1
                     continue
-                pred = "Yes" if gt.is_direct_successor(g, a, b) else "No"
+                pred = "Yes" if any(gt.is_direct_successor(g, a, b)
+                                    for a in A for b in B) else "No"
 
             if kind is None or pred is None:
                 continue

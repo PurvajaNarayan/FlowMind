@@ -36,7 +36,28 @@ _SKIP_PREFIXES = (
 
 
 def _clean_label(raw: str) -> str:
-    return raw.strip().strip('"').strip("'").strip()
+    """Remove the quote pair Mermaid wraps a label in, without eating quotes that
+    belong to the label text.
+
+    The previous implementation was `.strip('"').strip("'")`, which removes quote
+    characters from each end independently. That truncated every label ending in
+    an apostrophe -- 569 of them across 182 charts in train -- so
+    `"Iterate over the list 'nums'"` became `Iterate over the list 'nums` and no
+    longer matched the label as quoted in the question. That accounted for all 129
+    questions the M1 harness had to skip as unresolvable.
+
+    Stripping *balanced* apostrophes is not safe either: 9 labels genuinely start
+    and end with one (e.g. `'sum' = 'sum' + 'i'`), so a balanced strip would
+    corrupt them too. An apostrophe pair is therefore only treated as a wrapper
+    when nothing between it is an apostrophe, which keeps `'Start'` -> `Start`
+    for a VLM that quotes with single quotes.
+    """
+    s = raw.strip()
+    while len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        s = s[1:-1].strip()
+    if len(s) >= 2 and s[0] == "'" and s[-1] == "'" and "'" not in s[1:-1]:
+        s = s[1:-1].strip()
+    return s
 
 
 def _parse_token(token: str, nodes: dict[str, Node]) -> str | None:
