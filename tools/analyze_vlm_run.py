@@ -52,11 +52,19 @@ import networkx as nx
 from flowmind.reader.mermaid_reader import mermaid_to_graph
 from flowmind.schema import FlowGraph
 
-# A prediction with wildly more edges than gold is a degenerate generation (the
-# model repeating itself until max_new_tokens), not a misread. code00521 produced
-# 170 edges against 22. Averaging those in would corrupt every aggregate, so they
-# are excluded from the metrics and reported separately.
+# A prediction with wildly more edges than gold is a degenerate generation, not a
+# misread, and averaging it in would corrupt every aggregate.
+#
+# The ratio is computed on DEDUPLICATED edges. The first version compared raw edge
+# lines and wrongly excluded code00521, which eval_vlm reported as 170 edges
+# against 22 gold: the model had repeated the same edge lines many times, but the
+# distinct graph was good (edge F1 0.837, label recall 0.947). Repetition that
+# collapses under dedup is cosmetic — the parser and every graph metric already
+# absorb it — so those samples are scored normally and merely noted.
 DEGENERATE_EDGE_RATIO = 3.0
+
+# Raw-to-distinct edge ratio above which we note that the model padded its output.
+DUPLICATE_LINE_RATIO = 1.5
 CYCLE_SCAN_LIMIT = 200      # simple_cycles can blow up; we only need "any / how many"
 
 
@@ -119,13 +127,20 @@ def analyze_row(row: dict) -> dict:
     lp, lr, lf = prf(edge_set(P, True), edge_set(G, True))
 
     gold_cycles, pred_cycles = count_cycles(G), count_cycles(P)
-    ratio = (len(P.edges) / len(G.edges)) if G.edges else float("inf")
+
+    # Degeneracy is about distinct structure, not output length: compare unique
+    # edges to unique gold edges. Duplicate lines are tracked separately.
+    ratio = (len(ep) / len(eg)) if eg else float("inf")
+    dup_ratio = (len(P.edges) / len(ep)) if ep else 1.0
 
     return {
         "key": row.get("key"),
         "subset": (row.get("key") or "").rstrip("0123456789"),
         "scale": row.get("scale", 1.0),
         "degenerate": ratio > DEGENERATE_EDGE_RATIO,
+        "duplicated": dup_ratio >= DUPLICATE_LINE_RATIO,
+        "raw_edges": len(P.edges),
+        "distinct_edges": len(ep),
         "parse_failed": len(P.nodes) == 0,
         "label_recall": label_recall,
         "shape_aligned": aligned,
@@ -231,11 +246,18 @@ def main() -> None:
     for s in sorted({r["subset"] for r in good}):
         _bucket_report([r for r in good if r["subset"] == s], s)
 
+    dupes = [r for r in good if r["duplicated"]]
+    if dupes:
+        print("\n--- padded output (scored normally; dedup absorbs it) ---")
+        for r in dupes:
+            print(f"  {r['key']}: {r['raw_edges']} edge lines -> "
+                  f"{r['distinct_edges']} distinct, edge F1 {r['edge_f1']:.3f}")
+
     if degenerate:
         print("\n--- degenerate generations (excluded above) ---")
         for r in degenerate:
-            print(f"  {r['key']}: predicted {sum(r['pred_shapes'].values())} nodes, "
-                  f"likely repeated until max_new_tokens")
+            print(f"  {r['key']}: {r['distinct_edges']} distinct edges vs gold, "
+                  f"structure unusable")
 
 
 if __name__ == "__main__":
