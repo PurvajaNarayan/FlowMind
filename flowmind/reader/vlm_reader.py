@@ -57,11 +57,37 @@ DEFAULT_MAX_PIXELS = 4800 * 32 * 32
 # and a failure is more honest than a confidently-wrong graph.
 MIN_PIXELS_FLOOR = 512 * 32 * 32
 
+# Shapes were the one total failure of the first zero-shot sweep: over 20 charts
+# the model emitted 365 `process` nodes and 3 `decision`, against gold of 219
+# process / 56 decision / 51 io / 38 terminal. Measured shape accuracy was 61.4%,
+# which is exactly the 60.2% you get by labelling everything `process` — i.e. the
+# shape information was not being produced at all, even though the old prompt
+# listed the syntax. Listing it evidently isn't enough, so this version shows it
+# in use. The example deliberately contains all four shapes, a labelled Yes/No
+# branch, and a back-edge (E --> D), since loop edges were the other weak spot.
 PROMPT = (
     "You are reading a flowchart image. Output ONLY the Mermaid.js flowchart "
-    "script that reproduces it, starting with `flowchart TD`. Use ([...]) for "
-    "start/end, [/.../] for input/output, [...] for process, {...} for decision, "
-    "and -->|label| for labeled edges. No prose, no explanation, no code fences."
+    "script that reproduces it, starting with `flowchart TD`.\n"
+    "\n"
+    "The node shape is significant. Match it to the shape actually drawn:\n"
+    "  ([...])  rounded stadium  -> Start / End\n"
+    "  [/.../]  parallelogram    -> Input / Output\n"
+    "  [...]    rectangle        -> a process step\n"
+    "  {...}    diamond          -> a decision\n"
+    "\n"
+    "Follow this format exactly:\n"
+    "flowchart TD\n"
+    '    A(["Start"]) --> B[/"Input n"/]\n'
+    '    B --> C["total = 0"]\n'
+    '    C --> D{"n > 0?"}\n'
+    '    D -->|Yes| E["total = total + n"]\n'
+    '    E --> D\n'
+    '    D -->|No| F[/"Output total"/]\n'
+    "    F --> G([\"End\"])\n"
+    "\n"
+    "Transcribe every node once, quote each label in double quotes exactly as "
+    "drawn, and include arrows that loop back to an earlier node. No prose, no "
+    "explanation, no code fences."
 )
 
 _FENCE_RE = re.compile(r"^```(?:mermaid)?\s*|\s*```$", re.MULTILINE)
