@@ -7,11 +7,27 @@ no Reader, no router, no revision loop.
     python tools/run_baseline.py --n 8 --backend scripted
 
     # real run
-    python tools/run_baseline.py --n 100 --save runs/baseline_qwen3_8b.jsonl
+    python tools/run_baseline.py --n 120 --save runs/baseline_qwen3_8b.jsonl
 
-Sampling is stratified across all four question types (spec §3 asks for that
-explicitly), so the sample is not dominated by the topological questions that
-happen to be most numerous.
+Sampling is stratified over (subset x question type) -- 12 cells -- with a cap on
+how many questions come from any one flowchart, and a seeded shuffle inside each
+cell. All three parts are needed; each was added after the previous sample turned
+out to be misleading:
+
+  question type   spec §3 asks for it, and without it the sample is dominated by
+                  topological questions, which are the most numerous.
+  subset          train_full.json is ordered code-first, so a type-only sample of
+                  100 items came back 100% `code` -- and `code` is 261 of 1319
+                  records, with wiki (651) and instruct (407) absent. The VLM sweep
+                  had `code` at 0.854 edge-F1 against instruct's 0.619, so subsets
+                  genuinely differ.
+  per-chart cap   that same sample drew 100 questions from just 20 charts, so
+                  answers were clustered and the effective n was far below 100.
+  seeded shuffle  with a per-chart cap and no shuffle, selection follows question
+                  position: a chart's topological questions run node_count,
+                  edge_count, shortest_path, predecessor..., so the cap returned
+                  counting questions only and dropped adjacency entirely -- losing
+                  the split that carries the finding.
 
 SCORING, AND WHAT IS DELIBERATELY NOT SCORED HERE
 -------------------------------------------------
@@ -32,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -46,18 +63,63 @@ from flowmind.tracing import Trace, TraceWriter
 QA_TYPES = ("topological", "fact_retrieval", "applied_scenario", "flow_referential")
 
 
-def stratified_items(dataset: dict, n: int, data_dir: str):
-    """Round-robin across question types so every type is represented."""
-    buckets: dict[str, list] = defaultdict(list)
-    for item in iter_qa(dataset, data_dir=data_dir):
-        buckets[item.qa_type].append(item)
+SUBSETS = ("code", "instruct", "wiki")
 
-    out, i = [], 0
-    while len(out) < n and any(i < len(buckets[t]) for t in QA_TYPES if t in buckets):
-        for t in QA_TYPES:
-            if t in buckets and i < len(buckets[t]) and len(out) < n:
-                out.append(buckets[t][i])
-        i += 1
+
+def stratified_items(dataset: dict, n: int, data_dir: str,
+                     max_per_chart: int | None = 2, seed: int = 0):
+    """Round-robin over (subset x question type) so both dimensions are covered.
+
+    Stratifying on question type alone is not enough. train_full.json is ordered
+    code-first, so taking the first items of each type produced a 100-item sample
+    that was 100% `code` -- and `code` is only 261 of 1319 records, with wiki (651)
+    and instruct (407) absent entirely. That matters: the VLM sweep showed `code`
+    at 0.854 edge-F1 against instruct's 0.619, so subsets genuinely differ and a
+    code-only sample cannot speak for the dataset.
+
+    `max_per_chart` also caps how many questions come from any single flowchart.
+    The earlier sample drew 100 questions from just 20 charts, so answers were
+    clustered rather than independent and the effective sample size was well below
+    the nominal one.
+    """
+    buckets: dict[tuple[str, str], list] = defaultdict(list)
+    for item in iter_qa(dataset, data_dir=data_dir):
+        buckets[(item.subset, item.qa_type)].append(item)
+
+    # Shuffle within each cell, seeded. Taking items in dataset order biases the
+    # sample by question position: a chart's topological questions are ordered
+    # node_count, edge_count, shortest_path, predecessor..., so combining a
+    # per-chart cap with positional selection returned counting questions only and
+    # dropped adjacency entirely -- losing the 88.9%-vs-12.5% split that is the
+    # most informative thing in the run. A fixed seed keeps it reproducible.
+    rng = random.Random(seed)
+    for pool in buckets.values():
+        rng.shuffle(pool)
+
+    cells = [(s, t) for s in SUBSETS for t in QA_TYPES]
+    per_chart: Counter = Counter()
+    cursor = dict.fromkeys(cells, 0)
+    out: list = []
+
+    progressed = True
+    while len(out) < n and progressed:
+        progressed = False
+        for cell in cells:
+            if len(out) >= n:
+                break
+            pool = buckets.get(cell, [])
+            i = cursor[cell]
+            # Skip past charts that have already contributed their quota.
+            while i < len(pool) and max_per_chart is not None \
+                    and per_chart[pool[i].sample_key] >= max_per_chart:
+                i += 1
+            if i < len(pool):
+                out.append(pool[i])
+                per_chart[pool[i].sample_key] += 1
+                cursor[cell] = i + 1
+                progressed = True
+            else:
+                cursor[cell] = i
     return out
 
 
@@ -72,7 +134,14 @@ def main() -> None:
     ap.add_argument("--score-content", action="store_true",
                     help="apply the placeholder content metric (wiring checks only)")
     ap.add_argument("--max-new-tokens", type=int, default=128)
+    ap.add_argument("--max-per-chart", type=int, default=2,
+                    help="cap questions drawn from one flowchart (0 = no cap)")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="sampling seed; fixed so a run is reproducible")
     args = ap.parse_args()
+
+    if args.max_per_chart == 0:
+        args.max_per_chart = None
 
     if args.backend:
         import os
@@ -85,10 +154,18 @@ def main() -> None:
           f"model {getattr(client, 'model_id', 'n/a')}")
 
     ds = load_dataset(args.data)
-    items = stratified_items(ds, args.n, args.data_dir)
-    print(f"{len(items)} items: {dict(Counter(i.qa_type for i in items))}\n")
+    items = stratified_items(ds, args.n, args.data_dir,
+                             max_per_chart=args.max_per_chart, seed=args.seed)
+    print(f"{len(items)} items over {len({i.sample_key for i in items})} charts")
+    print(f"  by type   {dict(Counter(i.qa_type for i in items))}")
+    print(f"  by subset {dict(Counter(i.subset for i in items))}\n")
 
     topo = [0, 0]
+    topo_by_subset: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    # Yes/No adjacency vs counting is the split that carries the finding: the
+    # first-pass run scored 88.9% on adjacency and 12.5% on counting, i.e. the
+    # model does local lookups fine and does not aggregate at all.
+    topo_by_form: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     content_seen = 0
     content_hits = 0
     errors = 0
@@ -109,6 +186,12 @@ def main() -> None:
                 correct = topological_exact_match(res.answer, item.answers[0])
                 topo[0] += correct
                 topo[1] += 1
+                topo_by_subset[item.subset][0] += correct
+                topo_by_subset[item.subset][1] += 1
+                form = ("adjacency" if str(item.answers[0]).strip().lower()
+                        in ("yes", "no") else "counting")
+                topo_by_form[form][0] += correct
+                topo_by_form[form][1] += 1
                 mark = "OK" if correct else "X "
             else:
                 content_seen += 1
@@ -137,6 +220,10 @@ def main() -> None:
     if topo[1]:
         print(f"  topological exact match : {topo[0]}/{topo[1]} "
               f"({100*topo[0]/topo[1]:.1f}%)")
+        for form, (ok, t) in sorted(topo_by_form.items()):
+            print(f"    {form:<20}: {ok}/{t} ({100*ok/t:.1f}%)")
+        for sub, (ok, t) in sorted(topo_by_subset.items()):
+            print(f"    subset {sub:<13}: {ok}/{t} ({100*ok/t:.1f}%)")
     if content_seen:
         if args.score_content:
             print(f"  content (PLACEHOLDER)   : {content_hits}/{content_seen} "
