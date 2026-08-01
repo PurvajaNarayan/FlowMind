@@ -76,11 +76,16 @@ class LocalTransformersClient:
 
     def __init__(self, model_id: str | None = None, device: str | None = None,
                  load_in_4bit: bool = True,
-                 max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS):
+                 max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS,
+                 attn_implementation: str | None = "sdpa"):
         self.model_id = model_id or os.environ.get("FLOWMIND_LLM_MODEL", DEFAULT_MODEL_ID)
         self.device = device
         self.load_in_4bit = load_in_4bit
         self.max_new_tokens = max_new_tokens
+        # Some models (Phi-4-mini among them) default to flash-attention, which
+        # needs Ampere or newer. A Colab T4 is Turing, so force sdpa rather than
+        # let the load fail on hardware we know we are targeting.
+        self.attn_implementation = attn_implementation
         self._model = None
         self._tokenizer = None
 
@@ -112,6 +117,9 @@ class LocalTransformersClient:
         else:
             kwargs["dtype"] = (torch.float16 if self.device in ("cuda", "mps")
                                else torch.float32)
+
+        if self.attn_implementation:
+            kwargs["attn_implementation"] = self.attn_implementation
 
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         self._model = AutoModelForCausalLM.from_pretrained(self.model_id, **kwargs)
