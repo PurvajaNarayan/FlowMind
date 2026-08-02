@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+runs/
 
 # data & model artifacts (keep the repo light)
 data/*.json

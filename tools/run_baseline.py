@@ -67,8 +67,13 @@ SUBSETS = ("code", "instruct", "wiki")
 
 
 def stratified_items(dataset: dict, n: int, data_dir: str,
+                     qa_types: tuple[str, ...] = QA_TYPES,
                      max_per_chart: int | None = 2, seed: int = 0):
     """Round-robin over (subset x question type) so both dimensions are covered.
+
+    `qa_types` restricts which question types are sampled — e.g. the Examiner
+    runner passes only the three content types, reusing this same subset x
+    per-chart-cap x seeded-shuffle logic instead of duplicating it.
 
     Stratifying on question type alone is not enough. train_full.json is ordered
     code-first, so taking the first items of each type produced a 100-item sample
@@ -96,7 +101,7 @@ def stratified_items(dataset: dict, n: int, data_dir: str,
     for pool in buckets.values():
         rng.shuffle(pool)
 
-    cells = [(s, t) for s in SUBSETS for t in QA_TYPES]
+    cells = [(s, t) for s in SUBSETS for t in qa_types]
     per_chart: Counter = Counter()
     cursor = dict.fromkeys(cells, 0)
     out: list = []
