@@ -18,11 +18,14 @@ TWO DELIBERATE DEVIATIONS, both of which belong in the write-up
    The ensemble can be reinstated by running this with several --judge-model
    values and majority-voting the outputs; the single judge is the cheap default.
 
-2. The judge is Phi-4-mini (3.8B, MIT), NOT the model under test. Qwen3-8B scoring
-   its own answers would be self-preference bias and is the first thing a reader
-   would attack. A different lineage matters more here than raw capability, and
-   the judging task -- paraphrase detection against three short references -- is
-   far easier than the generation task being judged.
+2. The judge is Mistral-7B-Instruct (Apache 2.0), NOT the model under test.
+   Qwen3-8B scoring its own answers would be self-preference bias and is the first
+   thing a reader would attack. What matters is *lineage*, not raw capability --
+   note that DeepSeek's small distills are built on Qwen and Llama bases, so the
+   Qwen ones would reintroduce exactly the problem. The judging task, paraphrase
+   detection against three short references, is far easier than the generation
+   being judged, so a 7B model is ample. See DEFAULT_JUDGE_MODEL below for the
+   alternatives and why each is or isn't suitable.
 
 Because of (1) and (2), our numbers are NOT like-for-like with the paper's 68.42%
 for GPT-4V. Report them as our own measurement with the protocol cited.
@@ -41,8 +44,38 @@ from dataclasses import dataclass
 
 from flowmind.llm import LLMClient, LocalTransformersClient
 
-# 3.8B, MIT licence, different family from the Qwen3-8B under test.
-DEFAULT_JUDGE_MODEL = "microsoft/Phi-4-mini-instruct"
+# Apache 2.0, independent lineage from the Qwen3-8B under test.
+DEFAULT_JUDGE_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+
+# Judge alternatives, all settable via FLOWMIND_JUDGE_MODEL. The binding
+# constraint is lineage: the judge must not share a base model with the system
+# being graded, or "different model" stops meaning anything.
+#
+#   mistralai/Mistral-7B-Instruct-v0.3   default. Apache 2.0, ungated at time of
+#                                        writing, genuinely separate lineage.
+#                                        ~15GB download, ~5GB resident at 4-bit.
+#   mistralai/Ministral-8B-Instruct-*    newer Mistral 3 line, also Apache 2.0,
+#                                        reported to emit far fewer tokens --
+#                                        attractive for a judge that only needs a
+#                                        one-line rationale. Confirm the exact
+#                                        repo id on HF before relying on it.
+#   microsoft/Phi-4-mini-instruct        3.8B, MIT, smallest and cheapest option.
+#                                        Needs attn_implementation="sdpa" because
+#                                        it defaults to flash-attention, which a
+#                                        Turing T4 cannot do (llm.py handles this).
+#
+# NOT suitable:
+#   deepseek-ai/DeepSeek-R1-Distill-Qwen-*   distilled onto a QWEN base, so it
+#       shares lineage with the model under test. Same-family self-preference is
+#       exactly what picking a separate judge is meant to avoid.
+#   deepseek-ai/DeepSeek-R1-Distill-Llama-8B  lineage is fine (Llama base, MIT),
+#       but it is a reasoning model: it emits long chain-of-thought and would
+#       exhaust max_new_tokens before reaching the VERDICT line, turning verdicts
+#       into `unparsed`. Raise max_new_tokens a long way if trying it.
+#   Qwen3-*   same family as the answering model.
+#
+# If a gated repo refuses to download, either accept its terms on the HF model
+# page and set HF_TOKEN, or fall back to Phi-4-mini, which is ungated.
 
 CORRECT, INCORRECT, UNPARSED = "correct", "incorrect", "unparsed"
 
