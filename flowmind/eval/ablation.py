@@ -98,7 +98,8 @@ def single_pass_baseline(item: QAItem, client: LLMClient | None = None,
     return BaselineResult(answer=answer.strip(), prompt=prompt, qa_type=item.qa_type)
 
 
-def full_pipeline(item: QAItem, client: LLMClient | None = None) -> PipelineResult:
+def full_pipeline(item: QAItem, client: LLMClient | None = None,
+                  representation: str = "graph") -> PipelineResult:
     """Reader -> router -> {graph_tool | Examiner} — the other §8 ablation arm.
 
     Raises NotImplementedError if routed to code_request; see the module
@@ -116,7 +117,8 @@ def full_pipeline(item: QAItem, client: LLMClient | None = None) -> PipelineResu
                               correct=correct)
 
     if intent == "content":
-        res = examiner.answer(graph, item, client=client)
+        res = examiner.answer(graph, item, client=client,
+                              representation=representation)
         # correct is left None on purpose. It used to be (verdict == "accept"),
         # which scored the pipeline as right exactly when it decided it was right
         # -- and that decision read the gold answers. Correctness for content
@@ -133,7 +135,8 @@ def full_pipeline(item: QAItem, client: LLMClient | None = None) -> PipelineResu
     )
 
 
-def run_ablation(items: list[QAItem], client: LLMClient | None = None) -> dict:
+def run_ablation(items: list[QAItem], client: LLMClient | None = None,
+                 representation: str = "graph") -> dict:
     """Run single_pass_baseline and full_pipeline on the same items (spec §8).
 
     Both arms are scored identically, which is the only way the delta means
@@ -150,7 +153,8 @@ def run_ablation(items: list[QAItem], client: LLMClient | None = None) -> dict:
     rows = []
     for item in items:
         base = single_pass_baseline(item, client=client)
-        pipe = full_pipeline(item, client=client)
+        pipe = full_pipeline(item, client=client,
+                             representation=representation)
 
         base_correct = (topological_exact_match(base.answer, item.answers[0])
                         if item.qa_type == "topological" else None)
@@ -163,6 +167,8 @@ def run_ablation(items: list[QAItem], client: LLMClient | None = None) -> dict:
             "pipeline_branch": pipe.branch, "pipeline_revisions": pipe.revisions,
             # What the Examiner thought of its own answer, kept separate from
             # correctness so the two can be compared later (calibration).
+            "pipeline_representation": (pipe.examiner_result.representation
+                                       if pipe.examiner_result else None),
             "pipeline_verdict": (pipe.examiner_result.verdict
                                  if pipe.examiner_result else None),
         })

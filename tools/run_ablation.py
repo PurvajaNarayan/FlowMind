@@ -39,6 +39,9 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=40)
     ap.add_argument("--backend", choices=["local", "scripted"], default=None,
                     help="overrides FLOWMIND_LLM_BACKEND; 'scripted' needs no GPU")
+    ap.add_argument("--representation", choices=["graph", "mermaid"], default="graph",
+                    help="what the Examiner is shown. Run both to separate "
+                         "'the pipeline is worse' from 'the serialization is worse'")
     ap.add_argument("--save", default="runs/ablation.jsonl")
     ap.add_argument("--max-per-chart", type=int, default=2,
                     help="cap questions drawn from one flowchart (0 = no cap)")
@@ -64,7 +67,7 @@ def main() -> None:
                              max_per_chart=args.max_per_chart, seed=args.seed)
     print(f"{len(items)} items over {len({i.sample_key for i in items})} charts\n")
 
-    result = run_ablation(items, client=client)
+    result = run_ablation(items, client=client, representation=args.representation)
     rows, summary = result["rows"], result["summary"]
 
     with TraceWriter(args.save) as tw:

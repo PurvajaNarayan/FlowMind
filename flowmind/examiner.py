@@ -51,6 +51,36 @@ SYSTEM = (
     "reasoning."
 )
 
+# Wording deliberately identical to eval.ablation.SYSTEM. With
+# representation="mermaid" the Examiner then differs from the single-pass baseline
+# in exactly one respect -- the revision loop -- which is what makes the
+# representation experiment below a controlled comparison rather than a confound.
+SYSTEM_MERMAID = (
+    "You answer questions about flowcharts. You are given the flowchart as a "
+    "Mermaid.js script. Answer only from the flowchart. Be concise: a phrase or a "
+    "single sentence. Do not restate the question and do not explain your "
+    "reasoning."
+)
+
+REPRESENTATIONS = ("graph", "mermaid")
+
+# WHY REPRESENTATION IS SELECTABLE
+# --------------------------------
+# On the first 60-item ablation the pipeline scored BELOW the single-pass baseline
+# on content questions (-4.4 points under one judge, -8.9 under another). The loop
+# is not the explanation: it fired twice in 60 items, so the content arm was
+# essentially a single call.
+#
+# What did differ was the input. The Examiner reads the serialized node/edge
+# listing; the baseline reads the raw Mermaid. Mermaid preserves ordering and
+# nesting and is a format models have seen a great deal of, so it may simply be
+# the better representation -- in which case the deficit says nothing about the
+# agent architecture and everything about a formatting choice.
+#
+# Running the Examiner over both representations separates those two explanations.
+# Grounding checks still run against the graph either way, since they need node
+# and edge identity rather than surface text.
+
 
 @dataclass
 class ExaminerResult:
@@ -61,6 +91,7 @@ class ExaminerResult:
     revise_reason: str | None = None  # sent back to Reader when verdict == "revise"
     revisions: int = 0
     attempts: list[dict] = field(default_factory=list)  # per-attempt prompt/answer/reason
+    representation: str = "graph"   # which view of the chart the model was shown
 
 
 # Words too common to count as evidence that an answer is grounded in a chart.
@@ -94,14 +125,15 @@ def _graph_to_text(graph: FlowGraph) -> str:
     return "\n".join(lines)
 
 
-def build_content_prompt(graph: FlowGraph, item: QAItem) -> str:
-    parts = [
-        "Flowchart:",
-        _graph_to_text(graph),
-        "",
-        f"Question: {item.question.strip()}",
-    ]
-    return "\n".join(parts)
+def build_content_prompt(graph: FlowGraph, item: QAItem,
+                         representation: str = "graph") -> str:
+    if representation not in REPRESENTATIONS:
+        raise ValueError(f"representation must be one of {REPRESENTATIONS}, "
+                         f"got {representation!r}")
+    body = (item.mermaid.strip() if representation == "mermaid"
+            else _graph_to_text(graph))
+    header = "Flowchart (Mermaid):" if representation == "mermaid" else "Flowchart:"
+    return "\n".join([header, body, "", f"Question: {item.question.strip()}"])
 
 
 def _content_words(text: str) -> set[str]:
@@ -156,7 +188,8 @@ def _revise_prompt(base_prompt: str, prev_answer: str, reason: str) -> str:
 
 
 def answer(graph: FlowGraph, item: QAItem, client: LLMClient | None = None,
-           max_revisions: int = MAX_REVISIONS, max_new_tokens: int = 128) -> ExaminerResult:
+           max_revisions: int = MAX_REVISIONS, max_new_tokens: int = 128,
+           representation: str = "graph") -> ExaminerResult:
     """Generate a content answer and self-check it against the graph.
 
     On a failed check, re-prompts the same LLM with its previous answer and the
@@ -169,23 +202,27 @@ def answer(graph: FlowGraph, item: QAItem, client: LLMClient | None = None,
     flowmind.judge, once the pipeline has committed.
     """
     client = client or get_client()
-    base_prompt = build_content_prompt(graph, item)
+    base_prompt = build_content_prompt(graph, item, representation=representation)
+    system = SYSTEM_MERMAID if representation == "mermaid" else SYSTEM
     prompt = base_prompt
     attempts: list[dict] = []
 
     revisions = 0
     while True:
-        reply = client.complete(prompt, system=SYSTEM, max_new_tokens=max_new_tokens).strip()
+        reply = client.complete(prompt, system=system,
+                                max_new_tokens=max_new_tokens).strip()
         reason = check_grounding(reply, graph)
         attempts.append({"prompt": prompt, "answer": reply, "reason": reason})
 
         if reason is None:
             return ExaminerResult(answer=reply, verdict="accept",
-                                  revisions=revisions, attempts=attempts)
+                                  revisions=revisions, attempts=attempts,
+                                  representation=representation)
 
         if revisions >= max_revisions:
             return ExaminerResult(answer=reply, verdict="revise", revise_reason=reason,
-                                  revisions=revisions, attempts=attempts)
+                                  revisions=revisions, attempts=attempts,
+                                  representation=representation)
 
         prompt = _revise_prompt(base_prompt, reply, reason)
         revisions += 1

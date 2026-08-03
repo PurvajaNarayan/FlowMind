@@ -43,6 +43,9 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=40)
     ap.add_argument("--backend", choices=["local", "scripted"], default=None,
                     help="overrides FLOWMIND_LLM_BACKEND; 'scripted' needs no GPU")
+    ap.add_argument("--representation", choices=["graph", "mermaid"], default="graph",
+                    help="what the Examiner is shown: the node/edge listing "
+                         "(default) or the raw mermaid the baseline sees")
     ap.add_argument("--save", default="runs/examiner.jsonl")
     ap.add_argument("--max-new-tokens", type=int, default=128)
     ap.add_argument("--max-per-chart", type=int, default=2,

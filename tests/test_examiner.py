@@ -132,3 +132,35 @@ def test_grounding_flags_long_answers_about_another_chart():
         "The recipe requires whisking eggs, melting butter and chilling dough.",
         make_graph())
     assert reason and "does not reference" in reason
+
+
+# --- representation experiment ---------------------------------------------------
+
+def test_mermaid_representation_shows_the_raw_script():
+    client = ScriptedClient("It runs the do it step.")
+    res = answer(make_graph(), make_item(), client=client, representation="mermaid")
+    _, prompt = client.prompts[0]
+    assert "flowchart TD" in prompt          # raw mermaid, as the baseline sees
+    assert "Nodes:" not in prompt            # not the serialization
+    assert res.representation == "mermaid"
+
+
+def test_graph_representation_is_the_default():
+    client = ScriptedClient("It runs the do it step.")
+    res = answer(make_graph(), make_item(), client=client)
+    _, prompt = client.prompts[0]
+    assert "Nodes:" in prompt and "A -> B" in prompt
+    assert res.representation == "graph"
+
+
+def test_mermaid_system_prompt_matches_the_baseline_wording():
+    """Only the revision loop should differ from the baseline, not the framing."""
+    from flowmind.eval.ablation import SYSTEM as BASELINE_SYSTEM
+    from flowmind.examiner import SYSTEM_MERMAID
+    assert SYSTEM_MERMAID == BASELINE_SYSTEM
+
+
+def test_unknown_representation_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        build_content_prompt(make_graph(), make_item(), representation="nope")
