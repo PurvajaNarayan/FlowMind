@@ -64,3 +64,48 @@ def test_judge_uses_the_injected_client():
     system, prompt = client.prompts[0]
     assert "grade answers" in system.lower()
     assert "index i" in prompt
+
+
+# --- negative controls: a judge that never says "incorrect" is not a measurement --
+
+from tools.validate_judge import negate, renumber  # noqa: E402
+
+
+def test_negate_prefers_a_natural_edit():
+    assert negate("It outputs the index i.") == "It does not output the index i."
+    assert negate("The list is empty.") == "The list is not empty."
+
+
+def test_negate_falls_back_to_an_explicit_wrapper():
+    """No recognised verb, so wrap it -- clumsy but unambiguously the opposite."""
+    out = negate("Round shape")
+    assert out.lower().startswith("it is not true that")
+
+
+def test_renumber_changes_digits_and_skips_text_without_any():
+    assert renumber("Take 7 steps.") == "Take 10 steps."
+    assert renumber("Round shape") is None
+
+
+def test_a_rubber_stamp_judge_fails_the_hard_negative():
+    """The failure the topological-agreement check could not see.
+
+    A judge that always returns CORRECT looks perfect on gold and scores 100% on
+    any system it grades, while carrying no information at all.
+    """
+    stamp = Judge(client=ScriptedClient("RATIONALE: fine.\nVERDICT: CORRECT"))
+    gold = stamp.judge("What is output?", ["the index i"], "the index i")
+    swapped = stamp.judge("What is output?", ["the index i"],
+                          "Preheat the oven to 200C.")
+    assert gold.label == CORRECT        # true positive, looks good
+    assert swapped.label == CORRECT     # but the hard negative also passes
+    # i.e. true-negative rate 0%, which is what validate_judge.py reports on.
+
+
+def test_a_discriminating_judge_passes_both_directions():
+    good = Judge(client=ScriptedClient([
+        "RATIONALE: same claim.\nVERDICT: CORRECT",
+        "RATIONALE: unrelated to the chart.\nVERDICT: INCORRECT",
+    ]))
+    assert good.judge("q?", ["the index i"], "the index i").label == CORRECT
+    assert good.judge("q?", ["the index i"], "Preheat the oven.").label == INCORRECT

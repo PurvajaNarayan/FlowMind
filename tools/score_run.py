@@ -90,6 +90,11 @@ def main() -> None:
 
     content: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     by_subset: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    # An ablation trace file holds TWO rows per item -- one per arm, tagged by
+    # `branch` (single_pass vs examiner/graph_tool). Pooling them would average
+    # the two arms together and hide the very delta the ablation exists to show,
+    # so content accuracy is also reported per branch.
+    by_branch: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     agree = [0, 0]           # judge vs exact match on topological
     unparsed = 0
     out_rows = []
@@ -134,6 +139,9 @@ def main() -> None:
             content[qa_type][1] += 1
             by_subset[subset][0] += v.is_correct
             by_subset[subset][1] += 1
+            branch = row.get("branch") or "?"
+            by_branch[branch][0] += v.is_correct
+            by_branch[branch][1] += 1
             mark = f"judge={v.label}"
         else:
             mark = f"judge={v.label}"
@@ -151,6 +159,16 @@ def main() -> None:
         tot[1] += n
         print(f"  {t:<18} {pct(ok, n)}")
     print(f"  {'CONTENT OVERALL':<18} {pct(*tot)}")
+    if len(by_branch) > 1:
+        # Ablation file: this is the comparison.
+        print("\n  --- content accuracy by arm (the section 8 delta) ---")
+        for b, (ok, n) in sorted(by_branch.items()):
+            print(f"  {b:<18} {pct(ok, n)}")
+        base = by_branch.get("single_pass")
+        pipe = by_branch.get("examiner")
+        if base and pipe and base[1] and pipe[1]:
+            d = 100 * (pipe[0] / pipe[1] - base[0] / base[1])
+            print(f"  {'delta':<18} {d:+.1f} points (pipeline - baseline)")
     if by_subset:
         print()
         for s, (ok, n) in sorted(by_subset.items()):

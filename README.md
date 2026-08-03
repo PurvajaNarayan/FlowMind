@@ -185,7 +185,7 @@ g = image_to_graph("data/images/main/code00453.png")   # raises NotImplementedEr
 ## Current status
 
 - **M0 done** — data loader, Mermaid parser, router, graph tool, all tested.
-- **M1 in progress** — deterministic topological lane on all 1319 train records:
+- **M1 done** — deterministic topological lane on all 1319 train records:
 
   | subtype | accuracy | scored |
   |---|---|---|
@@ -226,6 +226,54 @@ g = image_to_graph("data/images/main/code00453.png")   # raises NotImplementedEr
   > legitimately end in one, so they no longer matched the label quoted in the
   > question. Fixing that plus existential matching for duplicate labels brought
   > coverage to 99.7%.
+
+- **M2 in progress / M5 first result** — Examiner built, and the §8 ablation run on
+  a 60-item stratified sample (Qwen3-8B, 4-bit, greedy). The headline is that
+  decomposition pays off exactly where a deterministic tool can replace the LLM,
+  and is neutral where the LLM is still doing the work:
+
+  | question type | single-pass baseline | full pipeline | delta |
+  |---|---|---|---|
+  | topological (43% of the benchmark) | 46.7% | **100.0%** | **+53.3** |
+  | content (57%) | 82.2% | 80.0% | −2.2 |
+
+  Topological is exact match on both arms, no judge involved. Content is judged by
+  `flowmind/judge.py`; reproduce with `tools/run_ablation.py` then
+  `tools/score_run.py`.
+
+  Three things that shaped those numbers and belong in any write-up:
+
+  1. **The content deficit was mostly a formatting choice, not the architecture.**
+     Feeding the Examiner the serialized node/edge listing scored −8.9 against the
+     baseline; feeding it the same raw Mermaid the baseline sees recovers 3 of the 4
+     lost answers, leaving −2.2 (one answer in 45, i.e. noise). Run both with
+     `--representation graph|mermaid`. With representations matched, the two arms
+     frequently return byte-identical answers — greedy decoding, same prompt, and a
+     revision loop that fires 2–3 times in 60 items.
+  2. **The revision loop contributes nothing measurable yet.** It triggers on
+     graph-grounding failures, which this model rarely produces. For the Examiner to
+     earn its place the self-checks have to fire more often *and* catch real errors.
+  3. **The judge was chosen by measurement, and it mattered.** Phi-4-mini scores
+     100% on the negative controls in `tools/validate_judge.py`; Mistral-7B scores
+     82.7% and inflated the same 90 answers from 77.8% to 97.8%. Agreement with
+     exact match on topological questions does *not* validate a judge — both models
+     scored 30/30 there while differing by 20 points on content.
+
+  **Do not compare the text-path content numbers to FlowVQA's leaderboard.** The
+  published baselines (GPT-4V 68.42%, TextFlow ~82.7%) read the flowchart as an
+  *image*; this pipeline reads the ground-truth Mermaid source, which is a strictly
+  easier task. Only the VLM Reader results are comparable in kind.
+
+- **Vision Reader (stretch)** — zero-shot Qwen3-VL-2B, image → Mermaid → graph:
+  **0.860 edge F1, 0.971 node-label recall**, cycle recall 6/9. Node shapes come out
+  at the majority-class baseline (61.4% ≈ the 60.2% from always guessing `process`),
+  so shape recognition is a perception gap rather than a formatting one. Resolution
+  is *not* the bottleneck — edge F1 rose with downscaling (0.788 full-res → 0.932 at
+  ≤0.6×), so a larger GPU would not help. A one-shot prompt ablation is a measured
+  negative result: it induced shape syntax but degraded structure and leaked its own
+  example into three answers (`FLOWMIND_VLM_PROMPT=v1|v2`).
+
+- **M3 not started** — Planner and `metrics.behavioral_equivalence` are stubs.
 
   Question-type classifier (no-LLM router fallback): **99.5%** on `test_full.json`
   (`python tools/train_router.py`).
