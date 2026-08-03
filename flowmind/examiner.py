@@ -196,20 +196,57 @@ _ORDER_BEFORE = ("before", "previous", "preceding", "precedes", "prior")
 _COUNT_ASK = ("how many", "number of")
 
 
+# Node references in a question, in every quoting style FlowVQA uses.
+#
+# Topological questions use doubled double-quotes: ""like this."" Content questions
+# use SINGLE quotes inside prose -- "Upon reaching the 'calculate median' step".
+# An earlier version handled only the double-quoted form, lifted from
+# parser_coverage which deals with topological questions, so on content questions it
+# always returned [] and every check downstream of it silently never ran. Measured:
+# 0 of 7422 content questions contain a double-quoted span, while 1769 contain a
+# single-quoted one and 923 of those resolve to a real node label.
+_Q_SPANS = re.compile(
+    r'""(.*?)""'          # ""doubled"" -- topological style
+    r'|"([^"]{3,})"'      # "plain double"
+    r"|'([^']{3,})'"      # 'single' -- content style, the one that was missing
+)
+
+
 def _labels_quoted_in_question(question: str) -> list[str]:
-    """FlowVQA quotes node labels with doubled double-quotes: ""like this.""."""
-    doubled = re.findall(r'""(.*?)""', question or "")
-    return [m.strip() for m in doubled] if doubled else re.findall(r'"([^"]+)"', question or "")
+    """Every quoted span in the question that might name a node.
+
+    Three-character minimum so stray apostrophes and single letters are not treated
+    as node references.
+    """
+    out = []
+    for m in _Q_SPANS.finditer(question or ""):
+        span = next((g for g in m.groups() if g), "").strip()
+        if span:
+            out.append(span)
+    return out
 
 
 def _norm_label(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip().rstrip(".").lower()
 
 
+# A quoted span matching this many nodes by substring is too vague to anchor on:
+# "count" hits "Set count to 0", "count < n + 1?" and "Increment count", and taking
+# all three unions their neighbourhoods until almost any answer looks adjacent.
+_MAX_AMBIGUOUS_ANCHORS = 2
+
+
 def _resolve(graph: FlowGraph, label: str) -> list[str]:
+    """Node ids a quoted span could name. Exact label match wins; substring is a
+    fallback, and is dropped entirely when it is too ambiguous to be informative."""
     want = _norm_label(label)
+    if not want:
+        return []
     exact = [n.id for n in graph.nodes if _norm_label(n.label) == want]
-    return exact or [n.id for n in graph.nodes if want and want in _norm_label(n.label)]
+    if exact:
+        return exact
+    loose = [n.id for n in graph.nodes if want in _norm_label(n.label)]
+    return loose if len(loose) <= _MAX_AMBIGUOUS_ANCHORS else []
 
 
 def _mentions(reply: str, label: str) -> bool:

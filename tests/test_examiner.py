@@ -237,3 +237,30 @@ def test_examiner_loop_uses_the_question_aware_check():
     assert res.verdict == "accept"
     _, retry = client.prompts[1]
     assert "not one that follows" in retry
+
+
+def test_question_label_extraction_handles_every_quoting_style():
+    """Content questions single-quote node refs; topological ones use ""doubled"".
+
+    Handling only the doubled form made every question-aware check silently
+    unreachable on content questions -- 0 of 7422 contain a double-quoted span.
+    """
+    from flowmind.examiner import _labels_quoted_in_question as f
+    assert f("Upon reaching the 'calculate median' step, what follows?") == ["calculate median"]
+    assert f('Is ""End"" a direct predecessor of ""Start""?') == ["End", "Start"]
+    assert f("A question with no quotes at all") == []
+    assert f("Short 'ab' spans are ignored") == []      # under 3 chars
+
+
+def test_ambiguous_anchor_is_dropped_rather_than_unioned():
+    """A span matching many nodes would make the neighbourhood so wide that
+    nothing is ever flagged; dropping it is more honest than pretending to check."""
+    from flowmind.examiner import _resolve
+    g = FlowGraph(
+        nodes=[Node("A", "Set count to 0", NodeShape.PROCESS),
+               Node("B", "count < n?", NodeShape.DECISION),
+               Node("C", "Increment count", NodeShape.PROCESS),
+               Node("D", "Return count", NodeShape.IO)],
+        edges=[Edge("A", "B"), Edge("B", "C"), Edge("C", "D")], source="mermaid")
+    assert _resolve(g, "count") == []                   # 4 loose matches -> dropped
+    assert _resolve(g, "Set count to 0") == ["A"]       # exact match still resolves
