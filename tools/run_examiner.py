@@ -94,28 +94,35 @@ def main() -> None:
                 sample_key=item.sample_key, question_id=item.question_id,
                 intent="content", branch="examiner",
                 prediction=res.answer, gold=item.answers,
-                correct=(res.verdict == "accept"), revisions=res.revisions,
+                # correct stays None: "accept" only means the answer passed the
+                # Examiner's graph-only self-checks, which is not a correctness
+                # claim. Score these with tools/score_run.py (flowmind.judge).
+                correct=None, revisions=res.revisions,
             )
             for i, attempt in enumerate(res.attempts):
                 trace.add_step(f"examiner_attempt_{i}",
                                {"prompt": attempt["prompt"]},
-                               {"answer": attempt["answer"], "matched": attempt["matched"]})
+                               {"answer": attempt["answer"],
+                                "reject_reason": attempt["reason"]})
             tw.write(trace)
 
-            mark = "OK" if res.verdict == "accept" else "X "
+            mark = "ok" if res.verdict == "accept" else "REVISE"
             print(f"[{idx}/{len(items)}] {mark} {item.sample_key} "
                   f"[{item.qa_type[:16]:<16}] rev={res.revisions} {res.answer[:60]!r}")
 
     print(f"\n=== examiner over {len(items) - errors} items ===")
     total = sum(verdicts.values())
     if total:
-        print(f"  accept : {verdicts['accept']}/{total} "
+        print("  self-check outcome (NOT accuracy -- see tools/score_run.py):")
+        print(f"    accept : {verdicts['accept']}/{total} "
               f"({100*verdicts['accept']/total:.1f}%)")
-        print(f"  revise : {verdicts['revise']}/{total} "
+        print(f"    revise : {verdicts['revise']}/{total} "
               f"({100*verdicts['revise']/total:.1f}%)")
         print(f"  revisions distribution: {dict(sorted(revision_counts.items()))}")
     if errors:
         print(f"  errors : {errors}")
+    print(f"\n  answers recorded, unscored. To score them:")
+    print(f"    python tools/score_run.py {args.save}")
     print(f"  traces -> {args.save}")
 
 
