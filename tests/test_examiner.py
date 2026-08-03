@@ -9,6 +9,8 @@ from flowmind.examiner import (
     MAX_REVISIONS,
     answer,
     build_content_prompt,
+    check_answer,
+    check_answers_question,
     check_grounding,
 )
 from flowmind.llm import ScriptedClient
@@ -164,3 +166,74 @@ def test_unknown_representation_raises():
     import pytest
     with pytest.raises(ValueError):
         build_content_prompt(make_graph(), make_item(), representation="nope")
+
+
+# --- question-aware checks: the failure grounding alone could not see -------------
+
+def _sink_graph():
+    """Four sequential steps, so adjacency is unambiguous."""
+    return FlowGraph(
+        nodes=[Node("A", "Start", NodeShape.TERMINAL),
+               Node("B", "Detach the pipes", NodeShape.PROCESS),
+               Node("C", "Clean the detached pipes", NodeShape.PROCESS),
+               Node("D", "Reassemble the sink", NodeShape.PROCESS)],
+        edges=[Edge("A", "B"), Edge("B", "C"), Edge("C", "D")],
+        source="mermaid",
+    )
+
+
+AFTER_Q = 'What comes next after ""Detach the pipes""?'
+
+
+def test_grounding_alone_misses_a_grounded_but_wrong_answer():
+    """The motivating failure: a real step from the chart, wrong for the question."""
+    assert check_grounding("Reassemble the sink.", _sink_graph()) is None
+
+
+def test_question_aware_check_catches_it():
+    reason = check_answers_question("Reassemble the sink.", _sink_graph(), AFTER_Q)
+    assert reason and "not one that follows" in reason
+
+
+def test_question_aware_check_accepts_the_real_neighbour():
+    assert check_answers_question("Clean the detached pipes.",
+                                  _sink_graph(), AFTER_Q) is None
+
+
+def test_question_aware_check_stays_quiet_on_paraphrase():
+    """Naming no label at all must not fire -- a false alarm revises a good answer."""
+    assert check_answers_question("You wash them out.", _sink_graph(), AFTER_Q) is None
+
+
+def test_question_aware_check_ignores_questions_it_cannot_verify():
+    assert check_answers_question("Anything at all.", _sink_graph(),
+                                  "Why is this flowchart useful?") is None
+
+
+def test_count_check_flags_a_wrong_number():
+    q = 'How many steps are between ""Start"" and ""Reassemble the sink""?'
+    reason = check_answers_question("7 steps.", _sink_graph(), q)
+    assert reason and "flowchart gives 3 edges" in reason
+
+
+def test_count_check_accepts_edges_or_nodes_phrasing():
+    q = 'How many steps are between ""Start"" and ""Reassemble the sink""?'
+    for ok in ("3 steps.", "4 steps."):          # 3 edges, or 4 nodes on the path
+        assert check_answers_question(ok, _sink_graph(), q) is None
+
+
+def test_check_answer_runs_grounding_first():
+    # empty answer: grounding catches it before the question-aware checks run
+    assert "empty" in check_answer("", _sink_graph(), AFTER_Q)
+
+
+def test_examiner_loop_uses_the_question_aware_check():
+    item = QAItem(sample_key="k", question_id="1", question=AFTER_Q,
+                  answers=["Clean the detached pipes."], qa_type="fact_retrieval",
+                  mermaid="flowchart TD\n  A-->B", subset="instruct")
+    client = ScriptedClient(["Reassemble the sink.", "Clean the detached pipes."])
+    res = answer(_sink_graph(), item, client=client)
+    assert res.revisions == 1                     # the wrong-neighbour answer fired it
+    assert res.verdict == "accept"
+    _, retry = client.prompts[1]
+    assert "not one that follows" in retry

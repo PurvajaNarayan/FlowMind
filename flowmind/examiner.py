@@ -178,6 +178,139 @@ def check_grounding(reply: str, graph: FlowGraph) -> str | None:
     return None
 
 
+# --- question-aware checks -------------------------------------------------------
+#
+# check_grounding only asks "is this answer about this chart?". Measured against
+# seven answers the judge marked wrong, it caught zero of them, because every real
+# error is *about* the chart: the model names real steps and picks the wrong one.
+# One observed failure was answering with the correct answer to a DIFFERENT question
+# about the same flowchart -- perfectly grounded, completely wrong.
+#
+# These checks bring the question into it. Both are computable from question +
+# graph, never from gold, and both are deliberately conservative: they fire only
+# when the graph settles the matter, because a false alarm sends a correct answer
+# back for revision and can make things worse.
+
+_ORDER_AFTER = ("next", "after", "following", "follows", "subsequent", "then")
+_ORDER_BEFORE = ("before", "previous", "preceding", "precedes", "prior")
+_COUNT_ASK = ("how many", "number of")
+
+
+def _labels_quoted_in_question(question: str) -> list[str]:
+    """FlowVQA quotes node labels with doubled double-quotes: ""like this.""."""
+    doubled = re.findall(r'""(.*?)""', question or "")
+    return [m.strip() for m in doubled] if doubled else re.findall(r'"([^"]+)"', question or "")
+
+
+def _norm_label(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "")).strip().rstrip(".").lower()
+
+
+def _resolve(graph: FlowGraph, label: str) -> list[str]:
+    want = _norm_label(label)
+    exact = [n.id for n in graph.nodes if _norm_label(n.label) == want]
+    return exact or [n.id for n in graph.nodes if want and want in _norm_label(n.label)]
+
+
+def _mentions(reply: str, label: str) -> bool:
+    """Does the answer clearly refer to this node? Substring on the normalised
+    label, which is strict enough to avoid matching on one shared word."""
+    lab = _norm_label(label)
+    return bool(lab) and len(lab) > 3 and lab in _norm_label(reply)
+
+
+def _check_adjacency(reply: str, graph: FlowGraph, question: str) -> str | None:
+    """For "what comes next after X" style questions, is the named step adjacent?
+
+    Fires only when the answer names some other node in the chart *and* names none
+    of the ones actually adjacent to X. Answers that paraphrase rather than quote a
+    label mention nothing exactly, so they pass -- deliberately.
+    """
+    q = (question or "").lower()
+    after = any(w in q for w in _ORDER_AFTER)
+    before = any(w in q for w in _ORDER_BEFORE)
+    if not (after or before):
+        return None
+
+    anchors = [i for lab in _labels_quoted_in_question(question) for i in _resolve(graph, lab)]
+    if not anchors:
+        return None
+
+    if after:
+        adj = {e.target for e in graph.edges if e.source in anchors}
+    else:
+        adj = {e.source for e in graph.edges if e.target in anchors}
+    if not adj:
+        return None
+
+    labels = {n.id: n.label for n in graph.nodes}
+    if any(_mentions(reply, labels.get(i, "")) for i in adj):
+        return None                                   # named a genuine neighbour
+
+    named = [labels[i] for i in labels
+             if i not in adj and i not in anchors and _mentions(reply, labels[i])]
+    if named:
+        direction = "follows" if after else "precedes"
+        return (f"it names {named[0][:40]!r}, which is a step in the flowchart but "
+                f"not one that {direction} the step the question asks about")
+    return None
+
+
+def _check_count(reply: str, graph: FlowGraph, question: str) -> str | None:
+    """For "how many steps between X and Y" questions, does the number check out?
+
+    Only fires when the question quotes two resolvable labels, so the graph gives a
+    definite answer. Both the edge count and the node count along the path are
+    accepted, since "steps" is used for either.
+    """
+    q = (question or "").lower()
+    if not any(w in q for w in _COUNT_ASK):
+        return None
+    nums = [int(m) for m in re.findall(r"\b(\d{1,3})\b", reply or "")]
+    if not nums:
+        return None
+
+    labs = _labels_quoted_in_question(question)
+    if len(labs) < 2:
+        return None
+    A, B = _resolve(graph, labs[0]), _resolve(graph, labs[1])
+    if not (A and B):
+        return None
+
+    import networkx as nx
+    g = graph.to_networkx()
+    lengths = []
+    for a in A:
+        for b in B:
+            try:
+                lengths.append(nx.shortest_path_length(g, a, b))
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                pass
+    if not lengths:
+        return None
+    d = min(lengths)
+    if any(n in (d, d + 1) for n in nums):            # edges, or nodes on the path
+        return None
+    return (f"it says {nums[0]}, but the flowchart gives {d} edges "
+            f"({d + 1} steps) between the two named nodes")
+
+
+def check_answers_question(reply: str, graph: FlowGraph,
+                           question: str) -> str | None:
+    """Question-aware self-checks. Gold is never consulted."""
+    for check in (_check_adjacency, _check_count):
+        reason = check(reply, graph, question)
+        if reason:
+            return reason
+    return None
+
+
+def check_answer(reply: str, graph: FlowGraph, question: str) -> str | None:
+    """Every self-check, in order of cost. Grounding first since it is cheapest."""
+    return (check_grounding(reply, graph)
+            or check_answers_question(reply, graph, question))
+
+
 def _revise_prompt(base_prompt: str, prev_answer: str, reason: str) -> str:
     return (
         f"{base_prompt}\n\n"
@@ -211,7 +344,7 @@ def answer(graph: FlowGraph, item: QAItem, client: LLMClient | None = None,
     while True:
         reply = client.complete(prompt, system=system,
                                 max_new_tokens=max_new_tokens).strip()
-        reason = check_grounding(reply, graph)
+        reason = check_answer(reply, graph, item.question)
         attempts.append({"prompt": prompt, "answer": reply, "reason": reason})
 
         if reason is None:
