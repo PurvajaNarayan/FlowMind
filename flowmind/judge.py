@@ -18,22 +18,28 @@ TWO DELIBERATE DEVIATIONS, both of which belong in the write-up
    The ensemble can be reinstated by running this with several --judge-model
    values and majority-voting the outputs; the single judge is the cheap default.
 
-2. The judge is Mistral-7B-Instruct (Apache 2.0), NOT the model under test.
+2. The judge is Phi-4-mini (3.8B, MIT), NOT the model under test.
    Qwen3-8B scoring its own answers would be self-preference bias and is the first
    thing a reader would attack. What matters is *lineage*, not raw capability --
    note that DeepSeek's small distills are built on Qwen and Llama bases, so the
    Qwen ones would reintroduce exactly the problem. The judging task, paraphrase
    detection against three short references, is far easier than the generation
-   being judged, so a 7B model is ample. See DEFAULT_JUDGE_MODEL below for the
-   alternatives and why each is or isn't suitable.
+   being judged, so a 3.8B model is ample -- and measurably better here than a 7B
+   one. See DEFAULT_JUDGE_MODEL below for the numbers and for why each alternative
+   is or isn't suitable.
 
 Because of (1) and (2), our numbers are NOT like-for-like with the paper's 68.42%
 for GPT-4V. Report them as our own measurement with the protocol cited.
 
-The judge is checked rather than trusted: `tools/score_run.py` also runs it over
-the topological questions, where exact match gives unambiguous ground truth, and
-reports how often it agrees. That converts "we picked a judge" into "we picked a
-judge and measured it".
+The judge is checked rather than trusted, in two places:
+
+  tools/validate_judge.py  negative controls -- does it accept real answers AND
+      reject definitely-wrong ones? This is the check that matters, and it is what
+      chose the default model.
+  tools/score_run.py  agreement with exact match on the topological questions.
+      Worth having, but it certifies far less than it appears to: those answers are
+      "9" and "Yes", so both judges tried scored 30/30 there while differing by 20
+      points on content. Do not treat it as validation on its own.
 """
 
 from __future__ import annotations
@@ -44,25 +50,47 @@ from dataclasses import dataclass
 
 from flowmind.llm import LLMClient, LocalTransformersClient
 
-# Apache 2.0, independent lineage from the Qwen3-8B under test.
-DEFAULT_JUDGE_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+# Chosen on measured discrimination, not on size or vibes. tools/validate_judge.py
+# over 25 content questions x 4 controls:
+#
+#                            Phi-4-mini      Mistral-7B-Instruct-v0.3
+#   gold       (TPR)         25/25  100%     25/25  100%
+#   swapped    (TNR)         25/25  100%     23/25   92%
+#   negated    (TNR)         25/25  100%     19/25   76%
+#   renumbered (TNR)          2/2   100%      1/2    50%
+#   balanced accuracy              100.0%           91.3%
+#
+# Phi-4-mini is perfect on every control at 3.8B, while Mistral accepts roughly one
+# in six definitely-wrong answers and is weakest exactly where it matters: negation,
+# which is what flow_referential questions turn on. The smaller model wins because
+# this is constrained binary classification, not generation.
+#
+# Consequence for reporting: the same 90 content answers scored 97.8% under Mistral
+# and 77.8% under Phi. Phi's are the numbers to use, and Mistral's are inflated by
+# its leniency.
+#
+# Caveat that survives a perfect score: every control here is *definitely* wrong by
+# construction, so 100% rules out rubber-stamping but does not certify calibration
+# on partially-correct near-misses, which is the class real model errors fall into.
+DEFAULT_JUDGE_MODEL = "microsoft/Phi-4-mini-instruct"
 
 # Judge alternatives, all settable via FLOWMIND_JUDGE_MODEL. The binding
 # constraint is lineage: the judge must not share a base model with the system
 # being graded, or "different model" stops meaning anything.
 #
-#   mistralai/Mistral-7B-Instruct-v0.3   default. Apache 2.0, ungated at time of
-#                                        writing, genuinely separate lineage.
-#                                        ~15GB download, ~5GB resident at 4-bit.
+#   microsoft/Phi-4-mini-instruct        default. 3.8B, MIT, ungated, ~7.7GB
+#                                        download. Needs attn_implementation="sdpa"
+#                                        because it defaults to flash-attention,
+#                                        which a Turing T4 cannot do -- llm.py
+#                                        already handles that.
+#   mistralai/Mistral-7B-Instruct-v0.3   Apache 2.0, separate lineage, but measured
+#                                        weaker (TNR 82.7%). Kept so the judge
+#                                        comparison stays reproducible.
 #   mistralai/Ministral-8B-Instruct-*    newer Mistral 3 line, also Apache 2.0,
 #                                        reported to emit far fewer tokens --
 #                                        attractive for a judge that only needs a
 #                                        one-line rationale. Confirm the exact
 #                                        repo id on HF before relying on it.
-#   microsoft/Phi-4-mini-instruct        3.8B, MIT, smallest and cheapest option.
-#                                        Needs attn_implementation="sdpa" because
-#                                        it defaults to flash-attention, which a
-#                                        Turing T4 cannot do (llm.py handles this).
 #
 # NOT suitable:
 #   deepseek-ai/DeepSeek-R1-Distill-Qwen-*   distilled onto a QWEN base, so it
