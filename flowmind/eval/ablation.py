@@ -117,8 +117,13 @@ def full_pipeline(item: QAItem, client: LLMClient | None = None) -> PipelineResu
 
     if intent == "content":
         res = examiner.answer(graph, item, client=client)
+        # correct is left None on purpose. It used to be (verdict == "accept"),
+        # which scored the pipeline as right exactly when it decided it was right
+        # -- and that decision read the gold answers. Correctness for content
+        # questions is a separate, after-the-fact judgement (flowmind.judge via
+        # tools/score_run.py); `verdict` records only what the Examiner believed.
         return PipelineResult(answer=res.answer, branch="examiner", intent=intent,
-                              correct=(res.verdict == "accept"), revisions=res.revisions,
+                              correct=None, revisions=res.revisions,
                               examiner_result=res)
 
     raise NotImplementedError(
@@ -131,11 +136,15 @@ def full_pipeline(item: QAItem, client: LLMClient | None = None) -> PipelineResu
 def run_ablation(items: list[QAItem], client: LLMClient | None = None) -> dict:
     """Run single_pass_baseline and full_pipeline on the same items (spec §8).
 
-    Scores both arms the same way per question type so the delta is apples to
-    apples: exact match for topological, content_match for the other three
-    (still the spec §9 placeholder — see eval.metrics.content_match's own
-    caveat). Returns per-item rows plus a summary; writing Traces and printing
-    a report is the driver script's job (tools/run_ablation.py).
+    Both arms are scored identically, which is the only way the delta means
+    anything: exact match for topological, and NOTHING inline for the other three.
+
+    Content questions are recorded and left unscored here on purpose. Scoring them
+    with eval.metrics.content_match would put the spec §9 placeholder -- a naive
+    substring check, marked "for wiring only" in its own docstring -- into the
+    headline comparison. flowmind.judge exists for this; tools/score_run.py applies
+    it to the saved answers afterwards, so a run does not have to be repeated when
+    the judge changes.
     """
     client = client or get_client()
     rows = []
@@ -144,8 +153,7 @@ def run_ablation(items: list[QAItem], client: LLMClient | None = None) -> dict:
         pipe = full_pipeline(item, client=client)
 
         base_correct = (topological_exact_match(base.answer, item.answers[0])
-                        if item.qa_type == "topological"
-                        else content_match(base.answer, item.answers))
+                        if item.qa_type == "topological" else None)
 
         rows.append({
             "sample_key": item.sample_key, "question_id": item.question_id,
@@ -153,6 +161,10 @@ def run_ablation(items: list[QAItem], client: LLMClient | None = None) -> dict:
             "baseline_answer": base.answer, "baseline_correct": base_correct,
             "pipeline_answer": pipe.answer, "pipeline_correct": pipe.correct,
             "pipeline_branch": pipe.branch, "pipeline_revisions": pipe.revisions,
+            # What the Examiner thought of its own answer, kept separate from
+            # correctness so the two can be compared later (calibration).
+            "pipeline_verdict": (pipe.examiner_result.verdict
+                                 if pipe.examiner_result else None),
         })
 
     def _rate(key: str, qa_type: str | None = None) -> float | None:
@@ -169,12 +181,19 @@ def run_ablation(items: list[QAItem], client: LLMClient | None = None) -> dict:
                 "pipeline": _rate("pipeline_correct", t)}
             for t in sorted({r["qa_type"] for r in rows})
         },
-        # Items where the Examiner needed >=1 revision and still ended up
-        # accepted -- the self-correction loop rescuing a wrong first answer.
-        "examiner_revisions_recovered_answer": sum(
+        # How often the loop fired, and how often it ended up satisfied. Note this
+        # says nothing about correctness -- whether a revision improved the ANSWER
+        # needs the judge, comparing first and final attempts in the trace. The
+        # earlier version of this counted "revisions that recovered a correct
+        # answer" using a correctness flag derived from the gold-reading
+        # self-check, which made the number tautological.
+        "examiner_revised": sum(
             1 for r in rows
-            if r["pipeline_branch"] == "examiner"
-            and r["pipeline_revisions"] > 0 and r["pipeline_correct"]
+            if r["pipeline_branch"] == "examiner" and r["pipeline_revisions"] > 0
         ),
+        "examiner_unresolved": sum(
+            1 for r in rows if r["pipeline_verdict"] == "revise"
+        ),
+        "content_scored_inline": False,   # deliberately: use tools/score_run.py
     }
     return {"rows": rows, "summary": summary}

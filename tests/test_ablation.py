@@ -37,7 +37,10 @@ def test_full_pipeline_content_routes_to_examiner(sample):
     res = full_pipeline(item, client=client)
     assert res.branch == "examiner"
     assert res.intent == "content"
-    assert res.correct is True
+    # Content correctness is NOT decided here -- the judge does it afterwards.
+    # It used to be (verdict == "accept"), which read the gold answers.
+    assert res.correct is None
+    assert res.examiner_result.verdict == "accept"
     assert res.revisions == 0
     assert res.examiner_result is not None
 
@@ -46,10 +49,14 @@ def test_full_pipeline_examiner_revision_reflected_in_result(sample):
     item = make_item(sample["mermaid"], "fact_retrieval",
                      "What does the flowchart output when a fixed point is found?",
                      ["It outputs the index i."])
-    client = ScriptedClient(["wrong", "It outputs the index i."])
+    # First reply cites a step absent from the chart, so grounding fails and a
+    # revision fires; the second is grounded.
+    client = ScriptedClient(['It performs "launch the rocket".',
+                             "It outputs the index i."])
     res = full_pipeline(item, client=client)
-    assert res.correct is True
+    assert res.correct is None            # judged later, not here
     assert res.revisions == 1
+    assert res.examiner_result.verdict == "accept"
 
 
 def test_full_pipeline_raises_for_code_request(monkeypatch, sample):
@@ -77,11 +84,19 @@ def test_run_ablation_pairs_baseline_and_pipeline_per_item(sample):
     summary = result["summary"]
 
     assert summary["n"] == 2
+    # Only topological is scored inline, in both arms, so the delta stays
+    # apples-to-apples; content is recorded for the judge.
     assert summary["baseline_accuracy"] == 1.0
     assert summary["pipeline_accuracy"] == 1.0
     assert summary["by_type"]["topological"]["pipeline"] == 1.0
-    assert summary["by_type"]["fact_retrieval"]["pipeline"] == 1.0
-    assert summary["examiner_revisions_recovered_answer"] == 0
+    assert summary["by_type"]["fact_retrieval"]["pipeline"] is None
+    assert summary["by_type"]["fact_retrieval"]["baseline"] is None
+    assert summary["content_scored_inline"] is False
+    # Renamed: the old key counted "revisions that recovered a correct answer"
+    # from a correctness flag derived from the gold-reading self-check, which made
+    # it tautological. These two count what actually happened instead.
+    assert summary["examiner_revised"] == 0
+    assert summary["examiner_unresolved"] == 0
 
     rows = result["rows"]
     assert rows[0]["pipeline_branch"] == "graph_tool"

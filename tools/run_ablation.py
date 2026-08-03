@@ -79,8 +79,11 @@ def main() -> None:
                            correct=row["pipeline_correct"],
                            revisions=row["pipeline_revisions"]))
 
-            b = "OK" if row["baseline_correct"] else "X "
-            p = "OK" if row["pipeline_correct"] else "X "
+            # None means "not scored inline" (content questions), which must not
+            # render the same as a wrong answer.
+            def _m(v):
+                return "--" if v is None else ("OK" if v else "X ")
+            b, p = _m(row["baseline_correct"]), _m(row["pipeline_correct"])
             print(f"{row['sample_key']:<16} [{row['qa_type'][:16]:<16}] "
                   f"baseline={b} pipeline={p} ({row['pipeline_branch']}, "
                   f"rev={row['pipeline_revisions']})")
@@ -94,9 +97,14 @@ def main() -> None:
     print(f"  {'type':<20}{'baseline':>10}{'pipeline':>10}")
     for t, acc in sorted(summary["by_type"].items()):
         print(f"  {t:<20}{pct(acc['baseline']):>10}{pct(acc['pipeline']):>10}")
-    print(f"  examiner revisions recovered a wrong first answer: "
-          f"{summary['examiner_revisions_recovered_answer']}")
-    print(f"  traces -> {args.save}")
+    print(f"  examiner fired a revision : {summary['examiner_revised']}")
+    print(f"  examiner still unresolved : {summary['examiner_unresolved']}")
+    n_content = sum(1 for r in rows if r["qa_type"] != "topological")
+    if n_content:
+        print(f"\n  {n_content} content answers recorded, unscored here on purpose.")
+        print(f"  Score both arms with the judge:")
+        print(f"    python tools/score_run.py {args.save}")
+    print(f"\n  traces -> {args.save}")
 
 
 if __name__ == "__main__":
