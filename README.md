@@ -6,6 +6,7 @@ A Reader → (Graph tool | Examiner | Planner) pipeline that reads a flowchart,
 routes each question by intent, and answers it — with a deterministic graph lane
 for topological questions and a Qwen3-VL vision Reader as the stretch goal.
 Full spec: [`flowmind_feature_spec.md`](./flowmind_feature_spec.md).
+All measured results, with methodology and caveats: [`RESULTS.md`](./RESULTS.md).
 
 ---
 
