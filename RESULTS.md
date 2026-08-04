@@ -40,14 +40,20 @@ report results separately for each because they behave differently:
 
 - *topological* — questions about the structure of the diagram, answerable by
   counting or by checking connections. "How many nodes exist?" "Is box X directly
-  before box Y?" These make up **43%** of the benchmark.
+  before box Y?" There are **5,516** of these in the training split, **42.6%** of it.
 
 - *fact_retrieval* — "What does the flowchart output when a fixed point is found?"
 - *applied_scenario* — "John has done step 3; what should he do next?"
 - *flow_referential* — "What are the two conditions that lead to the loop ending?"
 
-The last three all require reading and understanding English, and together they make
-up the remaining **57%**.
+The last three all require reading and understanding English, and together they
+account for the remaining **7,422 questions, 57.4%** of the training split.
+
+The proportions are near-identical in the held-out test split (43.0% structural,
+57.0% language across its 9,475 questions) and across the whole dataset (42.8% /
+57.2% of 22,413 questions), so the "roughly 43/57" figures quoted in the tables below
+hold whichever split is meant. All results in this document use the training split
+unless stated.
 
 **The two systems we compare.** The whole project rests on one comparison:
 
@@ -122,8 +128,8 @@ decision-making actually improves results, and by how much.
 
 | question type | share of dataset | one LLM call | our pipeline | difference |
 |---|---|---|---|---|
-| structural (topological) | 43% | 46.7% | **100.0%** | **+53.3 points** |
-| language (other three) | 57% | 82.2% | 80.0% | −2.2 points |
+| structural (topological) | 42.6% | 46.7% | **100.0%** | **+53.3 points** |
+| language (other three) | 57.4% | 82.2% | 80.0% | −2.2 points |
 
 Read that as: on structural questions, a single LLM call gets 46.7% right, while our
 pipeline gets everything right — an improvement of 53.3 percentage points. On
