@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlowMind</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>FlowMind</h1>
+    <p>Paste a Mermaid diagram, attach a flowchart image, and ask a question — all in one message.</p>
+  </header>
+
+  <main id="thread" aria-live="polite">
+    <div class="msg assistant">
+      <div class="bubble">
+        Paste your flowchart's Mermaid source (a <code>```mermaid</code> fenced block works
+        best) or attach an image, then ask your question on the next line. I'll route it to
+        the deterministic graph tool for structural questions (node/edge counts, shortest
+        path, predecessor/successor) or to the LLM examiner for everything else.
+      </div>
+    </div>
+  </main>
+
+  <form id="composer-form">
+    <div id="attachment-row" class="hidden">
+      <span id="attachment-name"></span>
+      <button type="button" id="remove-attachment" aria-label="Remove attachment">&times;</button>
+    </div>
+    <div id="composer-row">
+      <button type="button" id="attach-btn" title="Attach a flowchart image" aria-label="Attach image">📎</button>
+      <input type="file" id="image-input" accept="image/*" hidden>
+      <textarea id="message" rows="3" placeholder="Paste Mermaid (or attach an image) and type your question…"></textarea>
+      <button type="submit" id="send-btn">Send</button>
+    </div>
+  </form>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
