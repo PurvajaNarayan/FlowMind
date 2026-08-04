@@ -29,6 +29,21 @@ def test_full_pipeline_topological_routes_to_graph_tool_no_llm(sample):
     assert res.revisions == 0
 
 
+def test_full_pipeline_topological_llm_fallback_on_parser_miss(sample):
+    # qa_type routes this topological, but the phrasing has none of the parser's
+    # keywords, so answer_topological returns kind=None and the LLM fallback
+    # fires: it picks edge_count and the deterministic compute returns 7.
+    item = make_item(sample["mermaid"], "topological",
+                     "count the arrows please", ["7"])
+    client = ScriptedClient('{"function": "edge_count", "labels": []}')
+    res = full_pipeline(item, client=client)
+    assert res.branch == "graph_tool_llm"
+    assert res.intent == "topological"
+    assert res.answer == "7"
+    assert res.correct is True
+    assert len(client.prompts) == 1       # LLM was consulted exactly once
+
+
 def test_full_pipeline_content_routes_to_examiner(sample):
     item = make_item(sample["mermaid"], "fact_retrieval",
                      "What does the flowchart output when a fixed point is found?",

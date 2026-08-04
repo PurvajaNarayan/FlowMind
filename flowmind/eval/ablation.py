@@ -39,6 +39,7 @@ from flowmind.data import QAItem
 from flowmind.eval.metrics import content_match, topological_exact_match
 from flowmind.examiner import ExaminerResult
 from flowmind.graph_tool import answer_topological
+from flowmind.graph_tool_llm import answer_topological_llm
 from flowmind.llm import LLMClient, get_client
 from flowmind.reader.mermaid_reader import mermaid_to_graph
 from flowmind.router import route
@@ -66,7 +67,7 @@ class BaselineResult:
 @dataclass
 class PipelineResult:
     answer: str | None
-    branch: str            # "graph_tool" | "examiner"
+    branch: str            # "graph_tool" | "graph_tool_llm" | "examiner"
     intent: str
     correct: bool | None = None
     revisions: int = 0
@@ -102,6 +103,13 @@ def full_pipeline(item: QAItem, client: LLMClient | None = None,
                   representation: str = "graph") -> PipelineResult:
     """Reader -> router -> {graph_tool | Examiner} — the other §8 ablation arm.
 
+    Topological questions go to the deterministic graph tool first; if the
+    keyword parser doesn't recognize the phrasing (kind is None), an LLM picks
+    the function and args and the SAME deterministic compute runs (branch
+    "graph_tool_llm"). On FlowVQA's templated questions the parser handles
+    everything, so the fallback is effectively a no-op there and the headline
+    numbers stay reproducible; it only earns its keep on free-form questions.
+
     Raises NotImplementedError if routed to code_request; see the module
     docstring for why that never happens when evaluating on FlowVQA itself.
     """
@@ -109,11 +117,18 @@ def full_pipeline(item: QAItem, client: LLMClient | None = None,
     intent = route(item.question, qa_type=item.qa_type)
 
     if intent == "topological":
-        _, pred, unresolved = answer_topological(graph, item.question)
+        kind, pred, unresolved = answer_topological(graph, item.question)
+        branch = "graph_tool"
+        if kind is None:
+            # Parser miss: resolve the client lazily (only now do we need it)
+            # and let the LLM choose which deterministic function to run.
+            client = client or get_client()
+            _, pred, unresolved = answer_topological_llm(graph, item.question, client)
+            branch = "graph_tool_llm"
         ans = None if (unresolved or pred is None) else str(pred)
         correct = (topological_exact_match(ans, item.answers[0])
                    if ans is not None else None)
-        return PipelineResult(answer=ans, branch="graph_tool", intent=intent,
+        return PipelineResult(answer=ans, branch=branch, intent=intent,
                               correct=correct)
 
     if intent == "content":
